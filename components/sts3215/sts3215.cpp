@@ -15,6 +15,8 @@ void STS3215Component::setup() {
   clear_rx_();
   for (auto &servo : servos_) {
     servo.preference = global_preferences->make_preference<STS3215PreferenceData>(servo.preference_key);
+    servo.calibration_preference = global_preferences->make_preference<STS3215CalibrationPreferenceData>(
+        servo.preference_key ^ 0x43414C42);
     load_preferences_(servo);
     update_commission_state_(servo, true);
     const uint8_t acceleration = servo.acceleration_raw;
@@ -633,7 +635,6 @@ void STS3215Component::load_preferences_(STS3215Servo &servo) {
     servo.calibration_up = data.up;
     servo.calibration_mask = data.calibration_mask;
     servo.calibration_unlocked = data.reserved != 0;
-    servo.position_bias = data.position_bias;
     servo.saved_position = data.last_position;
     servo.saved_position_valid = data.last_position_valid != 0;
   } else {
@@ -642,6 +643,10 @@ void STS3215Component::load_preferences_(STS3215Servo &servo) {
     servo.acceleration_raw = servo.default_acceleration;
     servo.jog_increment = 10.0f;
   }
+  STS3215CalibrationPreferenceData calibration_data{};
+  if (servo.calibration_preference.load(&calibration_data) &&
+      calibration_data.version == CALIBRATION_PREFERENCE_VERSION)
+    servo.position_bias = calibration_data.position_bias;
   servo.speed_limit_raw = speed_to_raw_(servo.speed_limit_display);
   servo.torque_limit_raw = static_cast<uint16_t>(servo.torque_limit_display * 10.0f);
 }
@@ -655,9 +660,10 @@ void STS3215Component::save_preferences_(STS3215Servo &servo) {
       PREFERENCE_VERSION, servo.speed_limit_display, servo.torque_limit_display, servo.jog_increment,
       servo.calibration_down, servo.calibration_middle, servo.calibration_up,
       servo.saved_position, servo.acceleration_raw, servo.calibration_mask,
-      static_cast<uint8_t>(servo.saved_position_valid), static_cast<uint8_t>(servo.calibration_unlocked),
-      servo.position_bias};
-  if (!servo.preference.save(&data))
+      static_cast<uint8_t>(servo.saved_position_valid), static_cast<uint8_t>(servo.calibration_unlocked)};
+  const STS3215CalibrationPreferenceData calibration_data = {
+      CALIBRATION_PREFERENCE_VERSION, servo.position_bias};
+  if (!servo.preference.save(&data) || !servo.calibration_preference.save(&calibration_data))
     ESP_LOGW(TAG, "Failed to save preferences for servo %u", servo.id);
   else
     global_preferences->sync();
