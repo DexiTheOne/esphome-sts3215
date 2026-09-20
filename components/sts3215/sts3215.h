@@ -117,6 +117,7 @@ struct STS3215PreferenceData {
   uint8_t calibration_mask;
   uint8_t last_position_valid;
   uint8_t reserved;
+  int32_t position_bias;
 };
 
 struct STS3215Servo {
@@ -130,6 +131,7 @@ struct STS3215Servo {
   int32_t position_raw{0};
   int32_t hardware_position_raw{0};
   int32_t position_offset{0};
+  int32_t position_bias{0};
   int32_t saved_position{0};
   bool saved_position_valid{false};
   int32_t target_raw{0};
@@ -143,6 +145,7 @@ struct STS3215Servo {
   int32_t calibration_middle{0};
   int32_t calibration_up{0};
   uint8_t calibration_mask{0};
+  bool calibration_unlocked{false};
   bool moving{false};
   bool moving_seen{false};
   bool command_active{false};
@@ -231,8 +234,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   static constexpr uint8_t REG_EEPROM_LOCK = 55;
   static constexpr uint8_t REG_PRESENT_POSITION = 56;
   static constexpr float STEPS_PER_REVOLUTION = 4096.0f;
-  static constexpr uint16_t MULTI_TURN_MAX_POSITION = 28672;
-  static constexpr uint32_t PREFERENCE_VERSION = 2;
+  static constexpr uint32_t PREFERENCE_VERSION = 3;
 
   STS3215Servo *find_servo_(uint8_t servo_id);
   bool read_register_(uint8_t, uint8_t, uint8_t *, uint8_t);

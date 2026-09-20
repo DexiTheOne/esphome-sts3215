@@ -45,6 +45,7 @@ CONF_JOG_REVERSE = "jog_reverse"
 CONF_SET_DOWN = "set_down"
 CONF_SET_MIDDLE = "set_middle"
 CONF_SET_UP = "set_up"
+CONF_RESET_BLINDS = "reset_blinds"
 CONF_INITIAL_SPEED = "initial_speed"
 CONF_INITIAL_ACCELERATION = "initial_acceleration"
 CONF_INITIAL_TORQUE_LIMIT = "initial_torque_limit"
@@ -75,6 +76,8 @@ def _unique_servo_ids(config):
 
 
 CALIBRATION_SCHEMA = cv.Schema({
+    cv.Optional(CONF_RESET_BLINDS): button.button_schema(
+        STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:restart-alert"),
     cv.Optional(CONF_JOG_INCREMENT): number.number_schema(
         STS3215JogIncrementNumber, unit_of_measurement=UNIT_DEGREES,
         entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:rotate-360"),
@@ -203,7 +206,7 @@ async def to_code(config):
 
         if CONF_TARGET_POSITION in servo_config:
             target = await _new_number(servo_config[CONF_TARGET_POSITION], var, servo_id,
-                                       0.0, 2520.0, 0.1)
+                                       -2520.0, 2520.0, 0.1)
             cg.add(var.set_target_position_number(servo_id, target))
         if CONF_SPEED_LIMIT in servo_config:
             speed = await _new_number(servo_config[CONF_SPEED_LIMIT], var, servo_id, 0.0, 360.0, 1.0)
@@ -233,6 +236,7 @@ async def to_code(config):
                                         0.1, 2520.0, 0.1)
                 cg.add(var.set_jog_increment_number(servo_id, jog))
             for key, action in {
+                CONF_RESET_BLINDS: 6,
                 CONF_JOG_FORWARD: 0, CONF_JOG_REVERSE: 1, CONF_SET_DOWN: 2,
                 CONF_SET_MIDDLE: 3, CONF_SET_UP: 4,
             }.items():

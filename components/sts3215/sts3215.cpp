@@ -451,8 +451,9 @@ void STS3215Component::process_commissioning_() {
     }
 
     case COMMISSION_WRITE_LIMITS: {
-      const uint8_t limits[] = {0, 0, static_cast<uint8_t>(MULTI_TURN_MAX_POSITION),
-                                static_cast<uint8_t>(MULTI_TURN_MAX_POSITION >> 8)};
+      // Mode 3 requires both limits to be zero. A non-zero maximum creates a
+      // hard stop at zero and prevents reverse jogging at the lower boundary.
+      const uint8_t limits[] = {0, 0, 0, 0};
       write_register_(servo->id, REG_MIN_ANGLE_LIMIT, limits, sizeof(limits));
       commission_state_ = COMMISSION_WRITE_PHASE;
       commission_next_ms_ = millis() + 20;
@@ -510,8 +511,7 @@ bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_re
   const uint16_t maximum = decode_u16_(&config[2]);
   const uint8_t phase = config[9];
   const uint8_t mode = config[24];
-  const bool ready = mode == 3 && (phase & 0x10) != 0 && minimum == 0 &&
-                     maximum >= MULTI_TURN_MAX_POSITION;
+  const bool ready = mode == 3 && (phase & 0x10) != 0 && minimum == 0 && maximum == 0;
   if (servo.multi_turn_sensor != nullptr)
     servo.multi_turn_sensor->publish_state(ready);
   if (log_result) {
@@ -532,6 +532,33 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   if (action == 0) { step(servo_id, servo->jog_increment); return; }
   if (action == 1) { step(servo_id, -servo->jog_increment); return; }
   if (action == 5) { commission_step_mode(servo_id); return; }
+  if (action == 6) {
+    if (!servo->has_position) {
+      ESP_LOGW(TAG, "Cannot reset blind %u calibration until position telemetry is available", servo_id);
+      return;
+    }
+    stop_servo(servo_id);
+    servo->position_offset = -servo->hardware_position_raw;
+    servo->position_bias = servo->position_offset;
+    servo->position_raw = 0;
+    servo->target_raw = 0;
+    servo->calibration_down = 0;
+    servo->calibration_middle = 0;
+    servo->calibration_up = 0;
+    servo->calibration_mask = 0;
+    servo->calibration_unlocked = true;
+    servo->saved_position = 0;
+    servo->saved_position_valid = true;
+    save_preferences_(*servo);
+    if (servo->target_position_number != nullptr)
+      servo->target_position_number->publish_state(0);
+    ESP_LOGW(TAG, "Blind %u calibration reset at logical position zero; point buttons unlocked", servo_id);
+    return;
+  }
+  if (!servo->calibration_unlocked) {
+    ESP_LOGW(TAG, "Blind %u calibration point is locked; press Reset Blind Calibration first", servo_id);
+    return;
+  }
   if (!servo->has_position) {
     ESP_LOGW(TAG, "Cannot save calibration for servo %u until position telemetry is available", servo_id);
     return;
@@ -539,7 +566,6 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   if (action == 2) { servo->calibration_down = servo->position_raw; servo->calibration_mask |= 0x01; }
   if (action == 3) { servo->calibration_middle = servo->position_raw; servo->calibration_mask |= 0x02; }
   if (action == 4) { servo->calibration_up = servo->position_raw; servo->calibration_mask |= 0x04; }
-  save_preferences_(*servo);
   ESP_LOGI(TAG, "Saved servo %u calibration point at raw position %ld", servo_id,
            static_cast<long>(servo->position_raw));
   if (servo->calibration_mask == 0x07 && !calibrated_(*servo)) {
@@ -549,7 +575,11 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
         (span < 0 && (middle_offset >= 0 || middle_offset <= span))) {
       ESP_LOGE(TAG, "Servo %u calibration invalid: middle must be strictly between down and up", servo_id);
     }
+  } else if (servo->calibration_mask == 0x07) {
+    servo->calibration_unlocked = false;
+    ESP_LOGI(TAG, "Servo %u blind calibration complete; point buttons locked and cover enabled", servo_id);
   }
+  save_preferences_(*servo);
   update_cover_(*servo);
 }
 
@@ -602,6 +632,8 @@ void STS3215Component::load_preferences_(STS3215Servo &servo) {
     servo.calibration_middle = data.middle;
     servo.calibration_up = data.up;
     servo.calibration_mask = data.calibration_mask;
+    servo.calibration_unlocked = data.reserved != 0;
+    servo.position_bias = data.position_bias;
     servo.saved_position = data.last_position;
     servo.saved_position_valid = data.last_position_valid != 0;
   } else {
@@ -623,7 +655,8 @@ void STS3215Component::save_preferences_(STS3215Servo &servo) {
       PREFERENCE_VERSION, servo.speed_limit_display, servo.torque_limit_display, servo.jog_increment,
       servo.calibration_down, servo.calibration_middle, servo.calibration_up,
       servo.saved_position, servo.acceleration_raw, servo.calibration_mask,
-      static_cast<uint8_t>(servo.saved_position_valid), 0};
+      static_cast<uint8_t>(servo.saved_position_valid), static_cast<uint8_t>(servo.calibration_unlocked),
+      servo.position_bias};
   if (!servo.preference.save(&data))
     ESP_LOGW(TAG, "Failed to save preferences for servo %u", servo.id);
   else
@@ -636,10 +669,14 @@ void STS3215Component::set_hardware_position_(STS3215Servo &servo, int32_t hardw
     // The servo's multi-turn counter can reset at power loss. The worm drive
     // cannot back-drive while off, so the last stopped position defines the
     // correct turn-number offset for this boot.
-    servo.position_offset = servo.saved_position_valid
-        ? static_cast<int32_t>(std::lround(static_cast<float>(servo.saved_position - hardware_position) /
-                                           STEPS_PER_REVOLUTION)) * static_cast<int32_t>(STEPS_PER_REVOLUTION)
-        : 0;
+    if (servo.saved_position_valid) {
+      const int32_t base_position = hardware_position + servo.position_bias;
+      servo.position_offset = servo.position_bias +
+          static_cast<int32_t>(std::lround(static_cast<float>(servo.saved_position - base_position) /
+                                           STEPS_PER_REVOLUTION)) * static_cast<int32_t>(STEPS_PER_REVOLUTION);
+    } else {
+      servo.position_offset = servo.position_bias;
+    }
     servo.has_position = true;
   }
   servo.position_raw = hardware_position + servo.position_offset;

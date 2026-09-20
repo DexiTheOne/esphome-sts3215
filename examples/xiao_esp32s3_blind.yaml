@@ -96,6 +96,8 @@ sts3215:
       torque_limit:
         name: Blind 1 Torque Limit
       calibration:
+        reset_blinds:
+          name: Blind 1 Reset Calibration
         jog_increment:
           name: Blind 1 Jog Increment
         jog_forward:

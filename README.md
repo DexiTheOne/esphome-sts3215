@@ -18,16 +18,15 @@ library is pulled into the firmware.
 - One block read for control settings and one block read for telemetry per
   servo per polling interval
 
-The component uses a seven-revolution STS3215 multi-turn command window. It
-does not change EEPROM settings such as servo ID or baud
-rate, limits, or operating mode. Configure each servo for the required position
-mode before installing it; unexpected EEPROM writes are intentionally excluded.
+The component uses signed STS3215 multi-turn positions. It does not change
+EEPROM settings such as servo ID or baud rate during normal operation;
+unexpected EEPROM writes are intentionally excluded.
 For this cover implementation, EEPROM register 33 (`Operating_Mode`) must be
 `3`. The optional `commission_step_mode` button can perform the complete setup
 once through the ESP32: operating mode 3, Phase bit 4 for multi-turn feedback,
-and a widened 0..28672 position window. It writes only when the full configuration
-is incomplete, relocks EEPROM, and verifies every value. Normal startup and
-polling never write EEPROM.
+and zero minimum/maximum limits for unrestricted motion in either direction. It
+writes only when the full configuration is incomplete, relocks EEPROM, and
+verifies every value. Normal startup and polling never write EEPROM.
 
 ## Hardware
 
@@ -133,17 +132,22 @@ after that is a read-only no-op, which avoids repeated EEPROM wear.
 
 ## Blind calibration
 
-1. Set **Jog Increment** to a convenient amount. It accepts 0.1 through 2520
+1. Press **Reset Calibration**. This clears all three points, defines the
+   current stationary position as logical zero, and unlocks the point buttons.
+2. Set **Jog Increment** to a convenient amount. It accepts 0.1 through 2520
    degrees, so commissioning can use tiny movements or multiple turns.
-2. Jog to the fully-down position and press **Set Fully Down**.
-3. Jog to the desired middle position and press **Set Middle**.
-4. Jog to fully up and press **Set Fully Up**.
+3. Jog to each position and press **Set Fully Down**, **Set Middle**, or **Set
+   Fully Up**. The three points can be recorded in any order.
 
 The middle encoder value must be strictly between the endpoint values, in
 either direction. Once all three points are valid, the cover maps 0% to down,
 50% to the calibrated middle, and 100% to up. This piecewise mapping preserves
-an intentionally off-center middle point. Calibration is independent for every
-servo and survives ESP32 resets. The last completed position is also saved; on
+an intentionally off-center middle point. Completing calibration locks the
+three point buttons; press **Reset Calibration** to deliberately start over.
+Cover commands are ignored until calibration is complete. The logical zero is
+not changed again after the points are saved, because doing so would shift all
+three endpoints. Calibration is independent for every servo and survives ESP32
+resets. The last completed position is also saved; on
 startup the component uses the still-stationary worm drive and the absolute
 single-turn angle to restore the servo's multi-turn coordinate frame.
 
@@ -173,8 +177,9 @@ button:
           degrees: 10
 ```
 
-Relative moves are clamped to the commissioned hardware position window. The
-calibrated cover never commands beyond its saved down/up endpoints.
+Mode 3 uses zero minimum and maximum angle limits so relative jogging can cross
+zero in either direction. The calibrated cover never commands beyond its saved
+down/up endpoints.
 
 ## Repository use later
 
