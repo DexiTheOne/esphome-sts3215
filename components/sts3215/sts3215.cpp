@@ -32,6 +32,7 @@ void STS3215Component::setup() {
 }
 
 void STS3215Component::loop() {
+  process_commissioning_();
   const uint32_t now = millis();
   if (!move_queue_.empty() &&
       (!has_started_move_ || static_cast<uint32_t>(now - last_move_started_) >= start_delay_ms_)) {
@@ -387,50 +388,110 @@ void STS3215Component::commission_step_mode(uint8_t servo_id) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
 
+  if (commission_state_ != COMMISSION_IDLE) {
+    ESP_LOGW(TAG, "A multi-turn commissioning operation is already in progress");
+    return;
+  }
   ESP_LOGW(TAG, "Servo %u multi-turn commissioning requested", servo_id);
-  if (update_commission_state_(*servo, true)) {
-    ESP_LOGW(TAG, "Servo %u is already fully commissioned; EEPROM was not written", servo_id);
+  commissioning_servo_id_ = servo_id;
+  commission_state_ = COMMISSION_CHECK;
+  commission_next_ms_ = millis();
+}
+
+void STS3215Component::process_commissioning_() {
+  if (commission_state_ == COMMISSION_IDLE ||
+      static_cast<int32_t>(millis() - commission_next_ms_) < 0)
+    return;
+
+  auto *servo = find_servo_(commissioning_servo_id_);
+  if (servo == nullptr) {
+    commission_state_ = COMMISSION_IDLE;
     return;
   }
 
   // This is deliberately reachable only from an explicit user button. Never
   // perform EEPROM writes automatically during setup or polling.
-  stop_servo(servo_id);
-  const uint8_t torque_off = 0;
-  const uint8_t unlocked = 0;
-  const uint8_t step_mode = 3;
-  const uint8_t locked = 1;
-  uint8_t phase = 0;
-  if (!read_register_(servo_id, REG_PHASE, &phase, 1)) {
-    ESP_LOGE(TAG, "Cannot commission servo %u: Phase register read failed", servo_id);
-    return;
-  }
-  phase |= 0x10;
-  const uint8_t limits[] = {0, 0, static_cast<uint8_t>(MULTI_TURN_MAX_POSITION),
-                            static_cast<uint8_t>(MULTI_TURN_MAX_POSITION >> 8)};
-  write_register_(servo_id, REG_TORQUE_ENABLE, &torque_off, 1);
-  if (servo->torque_sensor != nullptr)
-    servo->torque_sensor->publish_state(false);
-  write_register_(servo_id, REG_EEPROM_LOCK, &unlocked, 1);
-  delay(20);
-  uint8_t lock_state = 0xFF;
-  if (!read_register_(servo_id, REG_EEPROM_LOCK, &lock_state, 1) || lock_state != 0) {
-    ESP_LOGE(TAG, "Servo %u EEPROM did not unlock (lock=%u)", servo_id, lock_state);
-    return;
-  }
-  write_register_(servo_id, REG_MIN_ANGLE_LIMIT, limits, sizeof(limits));
-  delay(20);
-  write_register_(servo_id, REG_PHASE, &phase, 1);
-  delay(20);
-  write_register_(servo_id, REG_MODE, &step_mode, 1);
-  delay(50);
-  write_register_(servo_id, REG_EEPROM_LOCK, &locked, 1);
-  delay(50);
+  switch (commission_state_) {
+    case COMMISSION_CHECK:
+      if (update_commission_state_(*servo, true)) {
+        ESP_LOGW(TAG, "Servo %u is already fully commissioned; EEPROM was not written", servo->id);
+        commission_state_ = COMMISSION_IDLE;
+      } else {
+        commission_state_ = COMMISSION_PREPARE;
+        commission_next_ms_ = millis();
+      }
+      break;
 
-  if (update_commission_state_(*servo, true)) {
-    ESP_LOGW(TAG, "Servo %u commissioned successfully; power-cycle the complete node", servo_id);
-  } else {
-    ESP_LOGE(TAG, "Servo %u multi-turn commissioning verification failed", servo_id);
+    case COMMISSION_PREPARE: {
+      if (!read_register_(servo->id, REG_PHASE, &commissioning_phase_, 1)) {
+        ESP_LOGE(TAG, "Cannot commission servo %u: Phase register read failed", servo->id);
+        commission_state_ = COMMISSION_IDLE;
+        break;
+      }
+      commissioning_phase_ |= 0x10;
+      stop_servo(servo->id);
+      const uint8_t torque_off = 0;
+      write_register_(servo->id, REG_TORQUE_ENABLE, &torque_off, 1);
+      if (servo->torque_sensor != nullptr)
+        servo->torque_sensor->publish_state(false);
+      commission_state_ = COMMISSION_UNLOCK;
+      commission_next_ms_ = millis() + 20;
+      break;
+    }
+
+    case COMMISSION_UNLOCK: {
+      const uint8_t unlocked = 0;
+      write_register_(servo->id, REG_EEPROM_LOCK, &unlocked, 1);
+      // Some STS3215 firmware continues to report 1 from the lock register
+      // after accepting this command. The configuration read-back below is
+      // the authoritative success check, matching Feetech's official flow.
+      commission_state_ = COMMISSION_WRITE_LIMITS;
+      commission_next_ms_ = millis() + 20;
+      break;
+    }
+
+    case COMMISSION_WRITE_LIMITS: {
+      const uint8_t limits[] = {0, 0, static_cast<uint8_t>(MULTI_TURN_MAX_POSITION),
+                                static_cast<uint8_t>(MULTI_TURN_MAX_POSITION >> 8)};
+      write_register_(servo->id, REG_MIN_ANGLE_LIMIT, limits, sizeof(limits));
+      commission_state_ = COMMISSION_WRITE_PHASE;
+      commission_next_ms_ = millis() + 20;
+      break;
+    }
+
+    case COMMISSION_WRITE_PHASE:
+      write_register_(servo->id, REG_PHASE, &commissioning_phase_, 1);
+      commission_state_ = COMMISSION_WRITE_MODE;
+      commission_next_ms_ = millis() + 20;
+      break;
+
+    case COMMISSION_WRITE_MODE: {
+      const uint8_t step_mode = 3;
+      write_register_(servo->id, REG_MODE, &step_mode, 1);
+      commission_state_ = COMMISSION_LOCK;
+      commission_next_ms_ = millis() + 50;
+      break;
+    }
+
+    case COMMISSION_LOCK: {
+      const uint8_t locked = 1;
+      write_register_(servo->id, REG_EEPROM_LOCK, &locked, 1);
+      commission_state_ = COMMISSION_VERIFY;
+      commission_next_ms_ = millis() + 50;
+      break;
+    }
+
+    case COMMISSION_VERIFY:
+      if (update_commission_state_(*servo, true)) {
+        ESP_LOGW(TAG, "Servo %u commissioned successfully; power-cycle the complete node", servo->id);
+      } else {
+        ESP_LOGE(TAG, "Servo %u multi-turn commissioning verification failed", servo->id);
+      }
+      commission_state_ = COMMISSION_IDLE;
+      break;
+
+    case COMMISSION_IDLE:
+      break;
   }
 }
 

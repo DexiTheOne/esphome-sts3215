@@ -250,6 +250,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void publish_settings_(STS3215Servo &servo);
   void update_cover_(STS3215Servo &servo);
   void update_group_cover_();
+  void process_commissioning_();
   bool update_commission_state_(STS3215Servo &servo, bool log_result);
   void set_hardware_position_(STS3215Servo &servo, int32_t hardware_position);
   bool calibrated_(const STS3215Servo &servo) const {
@@ -279,6 +280,22 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   uint16_t position_tolerance_{5};
   uint32_t last_move_started_{0};
   bool has_started_move_{false};
+
+  enum CommissionState : uint8_t {
+    COMMISSION_IDLE,
+    COMMISSION_CHECK,
+    COMMISSION_PREPARE,
+    COMMISSION_UNLOCK,
+    COMMISSION_WRITE_LIMITS,
+    COMMISSION_WRITE_PHASE,
+    COMMISSION_WRITE_MODE,
+    COMMISSION_LOCK,
+    COMMISSION_VERIFY,
+  };
+  CommissionState commission_state_{COMMISSION_IDLE};
+  uint8_t commissioning_servo_id_{0};
+  uint8_t commissioning_phase_{0};
+  uint32_t commission_next_ms_{0};
 };
 
 template<typename... Ts> class STS3215StepAction : public Action<Ts...>, public Parented<STS3215Component> {
