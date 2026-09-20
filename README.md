@@ -22,9 +22,10 @@ The component uses the STS3215 signed multi-turn position range (approximately
 ±8 revolutions). It does not change EEPROM settings such as servo ID, baud
 rate, limits, or operating mode. Configure each servo for the required position
 mode before installing it; unexpected EEPROM writes are intentionally excluded.
-For this cover implementation, set EEPROM register 33 (`Operating_Mode`) to
-`3` using a servo commissioning tool. The component reads that register at
-startup and logs a warning if it is not mode 3, but never changes it itself.
+For this cover implementation, EEPROM register 33 (`Operating_Mode`) must be
+`3`. The optional `commission_step_mode` button can perform this once through
+the ESP32: it reads the current mode first, writes only when necessary, relocks
+EEPROM, and verifies the result. Normal startup and polling never write EEPROM.
 
 ## Hardware
 
@@ -71,6 +72,8 @@ sts3215:
         name: Encoder Position
       cover:
         name: Blind 1
+      commission_step_mode:
+        name: Commission Multi-Turn Mode
       speed_limit:
         name: Speed Limit
       torque_enabled:
@@ -113,6 +116,14 @@ The ESP32 saves settings and calibration in flash and restores the servo's
 volatile RAM registers after reboot. Number entities publish the selected UI
 precision (0.1 degree for position/jog and whole units for limits) instead of
 replacing it with register-conversion artifacts during every poll.
+
+### One-time multi-turn commissioning
+
+With the motor unloaded, press **Commission Multi-Turn Mode** once for each
+servo, then power-cycle the complete ESP32/servo system. The action addresses
+only that servo ID, disables torque, unlocks EEPROM, writes operating mode 3,
+relocks EEPROM, and reads the mode back. Pressing it again when mode 3 is
+already active is a read-only no-op, which avoids repeated EEPROM wear.
 
 ## Blind calibration
 

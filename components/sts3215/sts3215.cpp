@@ -384,11 +384,51 @@ bool STS3215Component::set_jog_increment(uint8_t servo_id, float value) {
   return true;
 }
 
+void STS3215Component::commission_step_mode(uint8_t servo_id) {
+  auto *servo = find_servo_(servo_id);
+  if (servo == nullptr) return;
+
+  uint8_t mode = 0xFF;
+  if (!read_register_(servo_id, REG_MODE, &mode, 1)) {
+    ESP_LOGE(TAG, "Cannot commission servo %u: operating mode read failed", servo_id);
+    return;
+  }
+  if (mode == 3) {
+    ESP_LOGI(TAG, "Servo %u is already commissioned in multi-turn mode 3; EEPROM was not written", servo_id);
+    return;
+  }
+
+  // This is deliberately reachable only from an explicit user button. Never
+  // perform EEPROM writes automatically during setup or polling.
+  stop_servo(servo_id);
+  const uint8_t torque_off = 0;
+  const uint8_t unlocked = 0;
+  const uint8_t step_mode = 3;
+  const uint8_t locked = 1;
+  write_register_(servo_id, REG_TORQUE_ENABLE, &torque_off, 1);
+  if (servo->torque_sensor != nullptr)
+    servo->torque_sensor->publish_state(false);
+  write_register_(servo_id, REG_EEPROM_LOCK, &unlocked, 1);
+  delay(20);
+  write_register_(servo_id, REG_MODE, &step_mode, 1);
+  delay(20);
+  write_register_(servo_id, REG_EEPROM_LOCK, &locked, 1);
+  delay(20);
+
+  mode = 0xFF;
+  if (read_register_(servo_id, REG_MODE, &mode, 1) && mode == 3) {
+    ESP_LOGI(TAG, "Servo %u commissioned successfully in multi-turn mode 3; power-cycle the servo", servo_id);
+  } else {
+    ESP_LOGE(TAG, "Servo %u commissioning verification failed (read mode %u)", servo_id, mode);
+  }
+}
+
 void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
   if (action == 0) { step(servo_id, servo->jog_increment); return; }
   if (action == 1) { step(servo_id, -servo->jog_increment); return; }
+  if (action == 5) { commission_step_mode(servo_id); return; }
   if (!servo->has_position) {
     ESP_LOGW(TAG, "Cannot save calibration for servo %u until position telemetry is available", servo_id);
     return;

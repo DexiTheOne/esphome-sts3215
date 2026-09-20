@@ -208,6 +208,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool set_acceleration(uint8_t servo_id, float value);
   bool set_torque_limit(uint8_t servo_id, float percent);
   bool set_jog_increment(uint8_t servo_id, float degrees);
+  void commission_step_mode(uint8_t servo_id);
   void calibration_action(uint8_t servo_id, uint8_t action);
   void command_cover(uint8_t servo_id, float position);
   void command_all_covers(float position);
@@ -222,6 +223,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   static constexpr uint8_t REG_ACCELERATION = 41;
   static constexpr uint8_t REG_GOAL_SPEED = 46;
   static constexpr uint8_t REG_TORQUE_LIMIT = 48;
+  static constexpr uint8_t REG_EEPROM_LOCK = 55;
   static constexpr uint8_t REG_PRESENT_POSITION = 56;
   static constexpr float STEPS_PER_REVOLUTION = 4096.0f;
   static constexpr uint32_t PREFERENCE_VERSION = 2;

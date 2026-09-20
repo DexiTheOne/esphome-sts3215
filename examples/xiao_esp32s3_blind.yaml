@@ -62,6 +62,10 @@ sts3215:
       initial_torque_limit: 30
       cover:
         name: Blind 1
+      # Press once during commissioning. If mode 3 is already set, this button
+      # performs no EEPROM write. Power-cycle the full node after a successful set.
+      commission_step_mode:
+        name: Blind 1 Commission Multi-Turn Mode
       position:
         name: Blind 1 Encoder Position
       position_raw:

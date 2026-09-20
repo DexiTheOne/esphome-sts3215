@@ -48,6 +48,7 @@ CONF_SET_UP = "set_up"
 CONF_INITIAL_SPEED = "initial_speed"
 CONF_INITIAL_ACCELERATION = "initial_acceleration"
 CONF_INITIAL_TORQUE_LIMIT = "initial_torque_limit"
+CONF_COMMISSION_STEP_MODE = "commission_step_mode"
 
 sts3215_ns = cg.esphome_ns.namespace("sts3215")
 STS3215Component = sts3215_ns.class_("STS3215Component", cg.PollingComponent, uart.UARTDevice)
@@ -133,6 +134,9 @@ SERVO_SCHEMA = cv.Schema({
         STS3215TorqueLimitNumber, unit_of_measurement=UNIT_PERCENT,
         entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:arm-flex"),
     cv.Optional(CONF_COVER): cover.cover_schema(STS3215Cover, device_class="blind"),
+    cv.Optional(CONF_COMMISSION_STEP_MODE): button.button_schema(
+        STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG,
+        icon="mdi:memory-arrow-down"),
     cv.Optional(CONF_CALIBRATION): CALIBRATION_SCHEMA,
 })
 
@@ -212,6 +216,12 @@ async def to_code(config):
             cg.add(cov.set_parent(var))
             cg.add(cov.set_servo_id(servo_id))
             cg.add(var.set_cover(servo_id, cov))
+
+        if CONF_COMMISSION_STEP_MODE in servo_config:
+            btn = await button.new_button(servo_config[CONF_COMMISSION_STEP_MODE])
+            cg.add(btn.set_parent(var))
+            cg.add(btn.set_servo_id(servo_id))
+            cg.add(btn.set_action(5))
 
         if calibration := servo_config.get(CONF_CALIBRATION):
             if CONF_JOG_INCREMENT in calibration:
