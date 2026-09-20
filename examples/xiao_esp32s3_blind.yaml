@@ -1,0 +1,97 @@
+substitutions:
+  device_name: sts3215-blind-demo
+  friendly_name: STS3215 Blind Demo
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: seeed_xiao_esp32s3
+  framework:
+    type: esp-idf
+
+logger:
+  # Native USB logging leaves the servo UART free.
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: local
+      path: ../components
+    components: [sts3215]
+
+# XIAO ESP32-S3: D6/TX = GPIO43 and D7/RX = GPIO44.
+# With the XIAO plugged into Seeed's bus-servo driver, the board routes these
+# through its half-duplex TTL interface. Set the driver's mode jumper to UART.
+uart:
+  id: servo_uart
+  tx_pin: GPIO43
+  rx_pin: GPIO44
+  baud_rate: 1000000
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 256
+
+sts3215:
+  id: blind_servo_bus
+  uart_id: servo_uart
+  update_interval: 1s
+  servos:
+    - servo_id: 1
+      inverted: false
+      position:
+        name: Blind Encoder Position
+      position_raw:
+        name: Blind Encoder Position Raw
+      speed:
+        name: Blind Servo Speed
+      load:
+        name: Blind Servo Torque Output
+      temperature:
+        name: Blind Servo Temperature
+      voltage:
+        name: Blind Servo Voltage
+      current:
+        name: Blind Servo Current
+      moving:
+        name: Blind Servo Moving
+      target_position:
+        name: Blind Target Position
+      speed_limit:
+        name: Blind Speed Limit
+      acceleration:
+        name: Blind Acceleration
+      torque_limit:
+        name: Blind Torque Limit
+      torque_enabled:
+        name: Blind Torque Enabled
+
+button:
+  - platform: template
+    name: Blind +10 Degrees
+    icon: mdi:plus
+    on_press:
+      - sts3215.step:
+          id: blind_servo_bus
+          servo_id: 1
+          degrees: 10
+
+  - platform: template
+    name: Blind -10 Degrees
+    icon: mdi:minus
+    on_press:
+      - sts3215.step:
+          id: blind_servo_bus
+          servo_id: 1
+          degrees: -10
