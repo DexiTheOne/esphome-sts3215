@@ -7,19 +7,24 @@ library is pulled into the firmware.
 ## Current features
 
 - Multiple independently addressed servos on one 1 Mbps UART bus
-- Absolute position commands and relative `sts3215.step` automations
-- Torque enable and torque-limit controls
-- Speed-limit and acceleration controls
+- Signed multi-turn position commands and relative `sts3215.step` automations
+- Persistent speed, acceleration, torque-limit, jog, and calibration settings
+- Three-point (down/middle/up) calibration and one cover per servo
+- Optional aggregate cover with bus-wide staggered motor starts
+- Automatic torque enable while moving and torque disable at rest
 - Position, speed, signed load/torque-output, voltage, temperature, current,
   and moving-state telemetry
-- Per-servo direction inversion for mirrored blind installations
+- Per-servo direction inversion for manual jog/position controls
 - One block read for control settings and one block read for telemetry per
   servo per polling interval
 
-The component currently targets the STS3215's normal position mode. It does not
-change EEPROM settings such as servo ID, baud rate, limits, or operating mode.
-That is intentional: unexpected EEPROM writes can strand a servo on the bus or
-move it outside a blind's safe travel.
+The component uses the STS3215 signed multi-turn position range (approximately
+±8 revolutions). It does not change EEPROM settings such as servo ID, baud
+rate, limits, or operating mode. Configure each servo for the required position
+mode before installing it; unexpected EEPROM writes are intentionally excluded.
+For this cover implementation, set EEPROM register 33 (`Operating_Mode`) to
+`3` using a servo commissioning tool. The component reads that register at
+startup and logs a warning if it is not mode 3, but never changes it itself.
 
 ## Hardware
 
@@ -64,12 +69,25 @@ sts3215:
       inverted: false
       position:
         name: Encoder Position
-      target_position:
-        name: Target Position
+      cover:
+        name: Blind 1
       speed_limit:
         name: Speed Limit
       torque_enabled:
         name: Torque Enabled
+      calibration:
+        jog_increment:
+          name: Jog Increment
+        jog_forward:
+          name: Jog Forward
+        jog_reverse:
+          name: Jog Reverse
+        set_down:
+          name: Set Fully Down
+        set_middle:
+          name: Set Middle
+        set_up:
+          name: Set Fully Up
 ```
 
 All entities are optional. `servo_id` must be unique within a component and is
@@ -78,8 +96,8 @@ validated in the range 0-253. The bus must be configured as 1,000,000 baud,
 
 ### Units and behavior
 
-- Position is exposed in degrees. Raw position is available separately in
-  encoder counts (4096 counts/revolution).
+- Position is signed multi-turn degrees. Raw position is available separately
+  in encoder counts (4096 counts/revolution).
 - Speed is exposed in degrees/second. A commanded speed limit of zero preserves
   the STS convention meaning "maximum/unlimited speed."
 - Load is the signed motor-output duty/load feedback, in percent. It is useful
@@ -88,7 +106,42 @@ validated in the range 0-253. The bus must be configured as 1,000,000 baud,
 - Acceleration is the raw 0-254 servo setting; one count represents the
   STS-series acceleration increment documented by Feetech.
 - `inverted: true` reverses user-facing position, speed, load, and relative-step
-  direction without writing the servo's EEPROM.
+  direction without writing the servo's EEPROM. Cover direction itself is
+  inferred from the saved down/middle/up encoder positions.
+
+The ESP32 saves settings and calibration in flash and restores the servo's
+volatile RAM registers after reboot. Number entities publish the selected UI
+precision (0.1 degree for position/jog and whole units for limits) instead of
+replacing it with register-conversion artifacts during every poll.
+
+## Blind calibration
+
+1. Set **Jog Increment** to a convenient amount. It accepts 0.1 through 2880
+   degrees, so commissioning can use tiny movements or multiple turns.
+2. Jog to the fully-down position and press **Set Fully Down**.
+3. Jog to the desired middle position and press **Set Middle**.
+4. Jog to fully up and press **Set Fully Up**.
+
+The middle encoder value must be strictly between the endpoint values, in
+either direction. Once all three points are valid, the cover maps 0% to down,
+50% to the calibrated middle, and 100% to up. This piecewise mapping preserves
+an intentionally off-center middle point. Calibration is independent for every
+servo and survives ESP32 resets. The last completed position is also saved; on
+startup the component uses the still-stationary worm drive and the absolute
+single-turn angle to restore the servo's multi-turn coordinate frame.
+
+Torque is enabled immediately before a queued move starts and disabled when
+the target is reached, motion stops, or `move_timeout` expires. The status
+entities expose encoder position, moving state, and actual torque-enable state.
+
+## Multiple blinds and start sequencing
+
+`start_delay` is enforced by one queue shared by all individual covers and the
+optional `main_cover`. Therefore group commands and several individual commands
+received at nearly the same time cannot start all motors together. The main
+cover queues calibrated servos in their `servos:` list order and reports their
+average position. Copy a servo list item and give it a unique ID to scale from
+one motor to six or more.
 
 ## Relative movement
 
@@ -103,9 +156,9 @@ button:
           degrees: 10
 ```
 
-Relative moves are clamped to the component's 0-360 degree software range. For
-a real blind, enforce narrower mechanical limits in Home Assistant/ESPHome and
-configure the servo's own angle limits as a final safety layer.
+Relative moves are clamped only to the signed protocol range, roughly -2880 to
++2880 degrees. The calibrated cover never commands beyond its saved down/up
+endpoints.
 
 ## Repository use later
 

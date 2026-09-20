@@ -46,52 +46,63 @@ uart:
 sts3215:
   id: blind_servo_bus
   uart_id: servo_uart
-  update_interval: 1s
+  update_interval: 500ms
+  # Every individual and group-cover command uses this one bus-wide queue.
+  # With six motors, IDs are started in the order listed below.
+  start_delay: 2s
+  move_timeout: 2min
+  position_tolerance: 5
+  main_cover:
+    name: All Blinds
   servos:
     - servo_id: 1
       inverted: false
+      initial_speed: 90
+      initial_acceleration: 20
+      initial_torque_limit: 30
+      cover:
+        name: Blind 1
       position:
-        name: Blind Encoder Position
+        name: Blind 1 Encoder Position
       position_raw:
-        name: Blind Encoder Position Raw
+        name: Blind 1 Encoder Position Raw
       speed:
-        name: Blind Servo Speed
+        name: Blind 1 Servo Speed
       load:
-        name: Blind Servo Torque Output
+        name: Blind 1 Servo Torque Output
       temperature:
-        name: Blind Servo Temperature
+        name: Blind 1 Servo Temperature
       voltage:
-        name: Blind Servo Voltage
+        name: Blind 1 Servo Voltage
       current:
-        name: Blind Servo Current
+        name: Blind 1 Servo Current
+      status:
+        name: Blind 1 Servo Status
       moving:
-        name: Blind Servo Moving
-      target_position:
-        name: Blind Target Position
-      speed_limit:
-        name: Blind Speed Limit
-      acceleration:
-        name: Blind Acceleration
-      torque_limit:
-        name: Blind Torque Limit
+        name: Blind 1 Servo Moving
       torque_enabled:
-        name: Blind Torque Enabled
+        name: Blind 1 Torque Enabled
+      target_position:
+        name: Blind 1 Multi-Turn Target
+      speed_limit:
+        name: Blind 1 Speed Limit
+      acceleration:
+        name: Blind 1 Acceleration
+      torque_limit:
+        name: Blind 1 Torque Limit
+      calibration:
+        jog_increment:
+          name: Blind 1 Jog Increment
+        jog_forward:
+          name: Blind 1 Jog Forward
+        jog_reverse:
+          name: Blind 1 Jog Reverse
+        set_down:
+          name: Blind 1 Set Fully Down
+        set_middle:
+          name: Blind 1 Set Middle
+        set_up:
+          name: Blind 1 Set Fully Up
 
-button:
-  - platform: template
-    name: Blind +10 Degrees
-    icon: mdi:plus
-    on_press:
-      - sts3215.step:
-          id: blind_servo_bus
-          servo_id: 1
-          degrees: 10
-
-  - platform: template
-    name: Blind -10 Degrees
-    icon: mdi:minus
-    on_press:
-      - sts3215.step:
-          id: blind_servo_bus
-          servo_id: 1
-          degrees: -10
+    # Scale to six motors by copying the item above and changing servo_id and
+    # entity names. Every servo has independent settings and calibration.
