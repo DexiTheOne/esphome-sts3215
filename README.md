@@ -7,7 +7,7 @@ library is pulled into the firmware.
 ## Current features
 
 - Multiple independently addressed servos on one 1 Mbps UART bus
-- Signed multi-turn position commands and relative `sts3215.step` automations
+- Multi-turn position commands and relative `sts3215.step` automations
 - Persistent speed, acceleration, torque-limit, jog, and calibration settings
 - Three-point (down/middle/up) calibration and one cover per servo
 - Optional aggregate cover with bus-wide staggered motor starts
@@ -18,14 +18,16 @@ library is pulled into the firmware.
 - One block read for control settings and one block read for telemetry per
   servo per polling interval
 
-The component uses the STS3215 signed multi-turn position range (approximately
-±8 revolutions). It does not change EEPROM settings such as servo ID, baud
+The component uses a seven-revolution STS3215 multi-turn command window. It
+does not change EEPROM settings such as servo ID or baud
 rate, limits, or operating mode. Configure each servo for the required position
 mode before installing it; unexpected EEPROM writes are intentionally excluded.
 For this cover implementation, EEPROM register 33 (`Operating_Mode`) must be
-`3`. The optional `commission_step_mode` button can perform this once through
-the ESP32: it reads the current mode first, writes only when necessary, relocks
-EEPROM, and verifies the result. Normal startup and polling never write EEPROM.
+`3`. The optional `commission_step_mode` button can perform the complete setup
+once through the ESP32: operating mode 3, Phase bit 4 for multi-turn feedback,
+and a widened 0..28672 position window. It writes only when the full configuration
+is incomplete, relocks EEPROM, and verifies every value. Normal startup and
+polling never write EEPROM.
 
 ## Hardware
 
@@ -78,6 +80,8 @@ sts3215:
         name: Speed Limit
       torque_enabled:
         name: Torque Enabled
+      multi_turn_mode:
+        name: Multi-Turn Mode Active
       calibration:
         jog_increment:
           name: Jog Increment
@@ -122,12 +126,14 @@ replacing it with register-conversion artifacts during every poll.
 With the motor unloaded, press **Commission Multi-Turn Mode** once for each
 servo, then power-cycle the complete ESP32/servo system. The action addresses
 only that servo ID, disables torque, unlocks EEPROM, writes operating mode 3,
-relocks EEPROM, and reads the mode back. Pressing it again when mode 3 is
-already active is a read-only no-op, which avoids repeated EEPROM wear.
+enables multi-turn feedback, widens the position limit, relocks EEPROM, and
+reads all four settings back. **Multi-Turn Mode Active** becomes ON only when
+the mode, Phase bit, and both limits verify correctly. Pressing the button again
+after that is a read-only no-op, which avoids repeated EEPROM wear.
 
 ## Blind calibration
 
-1. Set **Jog Increment** to a convenient amount. It accepts 0.1 through 2880
+1. Set **Jog Increment** to a convenient amount. It accepts 0.1 through 2520
    degrees, so commissioning can use tiny movements or multiple turns.
 2. Jog to the fully-down position and press **Set Fully Down**.
 3. Jog to the desired middle position and press **Set Middle**.
@@ -167,9 +173,8 @@ button:
           degrees: 10
 ```
 
-Relative moves are clamped only to the signed protocol range, roughly -2880 to
-+2880 degrees. The calibrated cover never commands beyond its saved down/up
-endpoints.
+Relative moves are clamped to the commissioned hardware position window. The
+calibrated cover never commands beyond its saved down/up endpoints.
 
 ## Repository use later
 

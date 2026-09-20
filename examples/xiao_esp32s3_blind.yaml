@@ -27,6 +27,7 @@ wifi:
 external_components:
   - source: github://DexiTheOne/esphome-sts3215@main
     components: [sts3215]
+    refresh: 0s
 
 # XIAO ESP32-S3: D6/TX = GPIO43 and D7/RX = GPIO44.
 # With the XIAO plugged into Seeed's bus-servo driver, the board routes these
@@ -60,8 +61,8 @@ sts3215:
       initial_torque_limit: 30
       cover:
         name: Blind 1
-      # Press once during commissioning. If mode 3 is already set, this button
-      # performs no EEPROM write. Power-cycle the full node after a successful set.
+      # Press once during commissioning. It verifies mode, Phase bit 4, and the
+      # multi-turn limits; once all pass, later presses perform no EEPROM write.
       commission_step_mode:
         name: Blind 1 Commission Multi-Turn Mode
       position:
@@ -84,6 +85,8 @@ sts3215:
         name: Blind 1 Servo Moving
       torque_enabled:
         name: Blind 1 Torque Enabled
+      multi_turn_mode:
+        name: Blind 1 Multi-Turn Mode Active
       target_position:
         name: Blind 1 Multi-Turn Target
       speed_limit:

@@ -159,6 +159,7 @@ struct STS3215Servo {
   sensor::Sensor *status_sensor{nullptr};
   binary_sensor::BinarySensor *moving_sensor{nullptr};
   binary_sensor::BinarySensor *torque_sensor{nullptr};
+  binary_sensor::BinarySensor *multi_turn_sensor{nullptr};
   STS3215PositionNumber *target_position_number{nullptr};
   STS3215SpeedNumber *speed_limit_number{nullptr};
   STS3215AccelerationNumber *acceleration_number{nullptr};
@@ -194,6 +195,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_status_sensor(uint8_t, sensor::Sensor *);
   void set_moving_sensor(uint8_t, binary_sensor::BinarySensor *);
   void set_torque_sensor(uint8_t, binary_sensor::BinarySensor *);
+  void set_multi_turn_sensor(uint8_t, binary_sensor::BinarySensor *);
   void set_target_position_number(uint8_t, STS3215PositionNumber *);
   void set_speed_limit_number(uint8_t, STS3215SpeedNumber *);
   void set_acceleration_number(uint8_t, STS3215AccelerationNumber *);
@@ -218,6 +220,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
  protected:
   static constexpr uint8_t INST_READ = 0x02;
   static constexpr uint8_t INST_WRITE = 0x03;
+  static constexpr uint8_t REG_MIN_ANGLE_LIMIT = 9;
+  static constexpr uint8_t REG_MAX_ANGLE_LIMIT = 11;
+  static constexpr uint8_t REG_PHASE = 18;
   static constexpr uint8_t REG_TORQUE_ENABLE = 40;
   static constexpr uint8_t REG_MODE = 33;
   static constexpr uint8_t REG_ACCELERATION = 41;
@@ -226,6 +231,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   static constexpr uint8_t REG_EEPROM_LOCK = 55;
   static constexpr uint8_t REG_PRESENT_POSITION = 56;
   static constexpr float STEPS_PER_REVOLUTION = 4096.0f;
+  static constexpr uint16_t MULTI_TURN_MAX_POSITION = 28672;
   static constexpr uint32_t PREFERENCE_VERSION = 2;
 
   STS3215Servo *find_servo_(uint8_t servo_id);
@@ -244,6 +250,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void publish_settings_(STS3215Servo &servo);
   void update_cover_(STS3215Servo &servo);
   void update_group_cover_();
+  bool update_commission_state_(STS3215Servo &servo, bool log_result);
   void set_hardware_position_(STS3215Servo &servo, int32_t hardware_position);
   bool calibrated_(const STS3215Servo &servo) const {
     if (servo.calibration_mask != 0x07) return false;

@@ -16,9 +16,7 @@ void STS3215Component::setup() {
   for (auto &servo : servos_) {
     servo.preference = global_preferences->make_preference<STS3215PreferenceData>(servo.preference_key);
     load_preferences_(servo);
-    uint8_t mode = 0xFF;
-    if (read_register_(servo.id, REG_MODE, &mode, 1) && mode != 3)
-      ESP_LOGW(TAG, "Servo %u is in operating mode %u; multi-turn covers require EEPROM mode 3", servo.id, mode);
+    update_commission_state_(servo, true);
     const uint8_t acceleration = servo.acceleration_raw;
     const uint8_t speed[] = {static_cast<uint8_t>(servo.speed_limit_raw),
                              static_cast<uint8_t>(servo.speed_limit_raw >> 8)};
@@ -91,6 +89,7 @@ STS_SETTER(set_current_sensor, current_sensor, sensor::Sensor)
 STS_SETTER(set_status_sensor, status_sensor, sensor::Sensor)
 STS_SETTER(set_moving_sensor, moving_sensor, binary_sensor::BinarySensor)
 STS_SETTER(set_torque_sensor, torque_sensor, binary_sensor::BinarySensor)
+STS_SETTER(set_multi_turn_sensor, multi_turn_sensor, binary_sensor::BinarySensor)
 STS_SETTER(set_target_position_number, target_position_number, STS3215PositionNumber)
 STS_SETTER(set_speed_limit_number, speed_limit_number, STS3215SpeedNumber)
 STS_SETTER(set_acceleration_number, acceleration_number, STS3215AccelerationNumber)
@@ -379,7 +378,7 @@ bool STS3215Component::set_torque_limit(uint8_t servo_id, float value) {
 bool STS3215Component::set_jog_increment(uint8_t servo_id, float value) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
-  servo->jog_increment = std::round(std::max(0.1f, std::min(2880.0f, value)) * 10.0f) / 10.0f;
+  servo->jog_increment = std::round(std::max(0.1f, std::min(2520.0f, value)) * 10.0f) / 10.0f;
   save_preferences_(*servo);
   return true;
 }
@@ -388,13 +387,9 @@ void STS3215Component::commission_step_mode(uint8_t servo_id) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
 
-  uint8_t mode = 0xFF;
-  if (!read_register_(servo_id, REG_MODE, &mode, 1)) {
-    ESP_LOGE(TAG, "Cannot commission servo %u: operating mode read failed", servo_id);
-    return;
-  }
-  if (mode == 3) {
-    ESP_LOGI(TAG, "Servo %u is already commissioned in multi-turn mode 3; EEPROM was not written", servo_id);
+  ESP_LOGW(TAG, "Servo %u multi-turn commissioning requested", servo_id);
+  if (update_commission_state_(*servo, true)) {
+    ESP_LOGW(TAG, "Servo %u is already fully commissioned; EEPROM was not written", servo_id);
     return;
   }
 
@@ -405,22 +400,69 @@ void STS3215Component::commission_step_mode(uint8_t servo_id) {
   const uint8_t unlocked = 0;
   const uint8_t step_mode = 3;
   const uint8_t locked = 1;
+  uint8_t phase = 0;
+  if (!read_register_(servo_id, REG_PHASE, &phase, 1)) {
+    ESP_LOGE(TAG, "Cannot commission servo %u: Phase register read failed", servo_id);
+    return;
+  }
+  phase |= 0x10;
+  const uint8_t limits[] = {0, 0, static_cast<uint8_t>(MULTI_TURN_MAX_POSITION),
+                            static_cast<uint8_t>(MULTI_TURN_MAX_POSITION >> 8)};
   write_register_(servo_id, REG_TORQUE_ENABLE, &torque_off, 1);
   if (servo->torque_sensor != nullptr)
     servo->torque_sensor->publish_state(false);
   write_register_(servo_id, REG_EEPROM_LOCK, &unlocked, 1);
   delay(20);
-  write_register_(servo_id, REG_MODE, &step_mode, 1);
-  delay(20);
-  write_register_(servo_id, REG_EEPROM_LOCK, &locked, 1);
-  delay(20);
-
-  mode = 0xFF;
-  if (read_register_(servo_id, REG_MODE, &mode, 1) && mode == 3) {
-    ESP_LOGI(TAG, "Servo %u commissioned successfully in multi-turn mode 3; power-cycle the servo", servo_id);
-  } else {
-    ESP_LOGE(TAG, "Servo %u commissioning verification failed (read mode %u)", servo_id, mode);
+  uint8_t lock_state = 0xFF;
+  if (!read_register_(servo_id, REG_EEPROM_LOCK, &lock_state, 1) || lock_state != 0) {
+    ESP_LOGE(TAG, "Servo %u EEPROM did not unlock (lock=%u)", servo_id, lock_state);
+    return;
   }
+  write_register_(servo_id, REG_MIN_ANGLE_LIMIT, limits, sizeof(limits));
+  delay(20);
+  write_register_(servo_id, REG_PHASE, &phase, 1);
+  delay(20);
+  write_register_(servo_id, REG_MODE, &step_mode, 1);
+  delay(50);
+  write_register_(servo_id, REG_EEPROM_LOCK, &locked, 1);
+  delay(50);
+
+  if (update_commission_state_(*servo, true)) {
+    ESP_LOGW(TAG, "Servo %u commissioned successfully; power-cycle the complete node", servo_id);
+  } else {
+    ESP_LOGE(TAG, "Servo %u multi-turn commissioning verification failed", servo_id);
+  }
+}
+
+bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_result) {
+  // Read EEPROM registers 9..33 in one transaction. Relevant offsets are:
+  // minimum=0, maximum=2, Phase=9, and Operating_Mode=24.
+  uint8_t config[25];
+  if (!read_register_(servo.id, REG_MIN_ANGLE_LIMIT, config, sizeof(config))) {
+    if (servo.multi_turn_sensor != nullptr)
+      servo.multi_turn_sensor->publish_state(false);
+    if (log_result)
+      ESP_LOGE(TAG, "Servo %u multi-turn configuration read failed", servo.id);
+    return false;
+  }
+  const uint16_t minimum = decode_u16_(&config[0]);
+  const uint16_t maximum = decode_u16_(&config[2]);
+  const uint8_t phase = config[9];
+  const uint8_t mode = config[24];
+  const bool ready = mode == 3 && (phase & 0x10) != 0 && minimum == 0 &&
+                     maximum >= MULTI_TURN_MAX_POSITION;
+  if (servo.multi_turn_sensor != nullptr)
+    servo.multi_turn_sensor->publish_state(ready);
+  if (log_result) {
+    if (ready) {
+      ESP_LOGI(TAG, "Servo %u multi-turn configuration verified: mode=%u phase=0x%02X limits=%u..%u",
+               servo.id, mode, phase, minimum, maximum);
+    } else {
+      ESP_LOGW(TAG, "Servo %u multi-turn configuration incomplete: mode=%u phase=0x%02X limits=%u..%u",
+               servo.id, mode, phase, minimum, maximum);
+    }
+  }
+  return ready;
 }
 
 void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {

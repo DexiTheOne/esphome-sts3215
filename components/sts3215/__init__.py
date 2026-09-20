@@ -49,6 +49,7 @@ CONF_INITIAL_SPEED = "initial_speed"
 CONF_INITIAL_ACCELERATION = "initial_acceleration"
 CONF_INITIAL_TORQUE_LIMIT = "initial_torque_limit"
 CONF_COMMISSION_STEP_MODE = "commission_step_mode"
+CONF_MULTI_TURN_MODE = "multi_turn_mode"
 
 sts3215_ns = cg.esphome_ns.namespace("sts3215")
 STS3215Component = sts3215_ns.class_("STS3215Component", cg.PollingComponent, uart.UARTDevice)
@@ -123,6 +124,8 @@ SERVO_SCHEMA = cv.Schema({
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC, icon="mdi:motion"),
     cv.Optional(CONF_TORQUE_ENABLED): binary_sensor.binary_sensor_schema(
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC, icon="mdi:engine"),
+    cv.Optional(CONF_MULTI_TURN_MODE): binary_sensor.binary_sensor_schema(
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC, icon="mdi:rotate-orbit"),
     cv.Optional(CONF_TARGET_POSITION): number.number_schema(
         STS3215PositionNumber, unit_of_measurement=UNIT_DEGREES, icon="mdi:angle-acute"),
     cv.Optional(CONF_SPEED_LIMIT): number.number_schema(
@@ -192,14 +195,15 @@ async def to_code(config):
                 cg.add(getattr(var, setter)(servo_id, sens))
 
         for key, setter in ((CONF_MOVING, "set_moving_sensor"),
-                            (CONF_TORQUE_ENABLED, "set_torque_sensor")):
+                            (CONF_TORQUE_ENABLED, "set_torque_sensor"),
+                            (CONF_MULTI_TURN_MODE, "set_multi_turn_sensor")):
             if key in servo_config:
                 sens = await binary_sensor.new_binary_sensor(servo_config[key])
                 cg.add(getattr(var, setter)(servo_id, sens))
 
         if CONF_TARGET_POSITION in servo_config:
             target = await _new_number(servo_config[CONF_TARGET_POSITION], var, servo_id,
-                                       -2880.0, 2880.0, 0.1)
+                                       0.0, 2520.0, 0.1)
             cg.add(var.set_target_position_number(servo_id, target))
         if CONF_SPEED_LIMIT in servo_config:
             speed = await _new_number(servo_config[CONF_SPEED_LIMIT], var, servo_id, 0.0, 360.0, 1.0)
@@ -226,7 +230,7 @@ async def to_code(config):
         if calibration := servo_config.get(CONF_CALIBRATION):
             if CONF_JOG_INCREMENT in calibration:
                 jog = await _new_number(calibration[CONF_JOG_INCREMENT], var, servo_id,
-                                        0.1, 2880.0, 0.1)
+                                        0.1, 2520.0, 0.1)
                 cg.add(var.set_jog_increment_number(servo_id, jog))
             for key, action in {
                 CONF_JOG_FORWARD: 0, CONF_JOG_REVERSE: 1, CONF_SET_DOWN: 2,
