@@ -15,6 +15,18 @@ static float tilt_openness(float tilt) {
   return 1.0f - std::abs(tilt * 2.0f - 1.0f);
 }
 
+static float next_cover_quarter(float tilt, bool increase) {
+  constexpr int QUARTER_COUNT = 4;
+  const float scaled = std::max(0.0f, std::min(1.0f, tilt)) * QUARTER_COUNT;
+  int quarter;
+  if (increase)
+    quarter = static_cast<int>(std::floor(scaled)) + 1;
+  else
+    quarter = static_cast<int>(std::ceil(scaled)) - 1;
+  quarter = std::max(0, std::min(QUARTER_COUNT, quarter));
+  return static_cast<float>(quarter) / QUARTER_COUNT;
+}
+
 void STS3215Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up STS3215 bus with %u servo(s)...", static_cast<unsigned>(servos_.size()));
   clear_rx_();
@@ -33,6 +45,7 @@ void STS3215Component::setup() {
     write_register_(servo.id, REG_TORQUE_LIMIT, torque, 2);
     write_register_(servo.id, REG_TORQUE_ENABLE, &disabled, 1);
     publish_settings_(servo);
+    publish_calibration_status_(servo);
   }
 }
 
@@ -115,6 +128,7 @@ STS_SETTER(set_speed_limit_number, speed_limit_number, STS3215SpeedNumber)
 STS_SETTER(set_acceleration_number, acceleration_number, STS3215AccelerationNumber)
 STS_SETTER(set_torque_limit_number, torque_limit_number, STS3215TorqueLimitNumber)
 STS_SETTER(set_jog_increment_number, jog_increment_number, STS3215JogIncrementNumber)
+STS_SETTER(set_calibration_status_sensor, calibration_status_sensor, text_sensor::TextSensor)
 STS_SETTER(set_cover, cover, STS3215Cover)
 
 #undef STS_SETTER
@@ -590,8 +604,6 @@ bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_re
 void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
-  if (action == 0) { step(servo_id, servo->jog_increment); return; }
-  if (action == 1) { step(servo_id, -servo->jog_increment); return; }
   if (action == 5) { commission_step_mode(servo_id); return; }
   if (action == 6) {
     stop_servo(servo_id);
@@ -603,16 +615,26 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     servo->calibration_up = 0;
     servo->calibration_mask = 0;
     servo->calibration_unlocked = true;
+    servo->calibration_error = false;
     servo->saved_position = 0;
     servo->saved_position_valid = true;
     save_preferences_(*servo);
+    publish_calibration_status_(*servo);
     if (servo->target_position_number != nullptr)
       servo->target_position_number->publish_state(0);
-    ESP_LOGW(TAG, "Blind %u calibration reset at logical position zero; point buttons unlocked", servo_id);
+    ESP_LOGW(TAG, "Blind %u calibration reset at logical position zero; calibration controls unlocked", servo_id);
     return;
   }
   if (!servo->calibration_unlocked) {
-    ESP_LOGW(TAG, "Blind %u calibration point is locked; press Reset Blind Calibration first", servo_id);
+    ESP_LOGW(TAG, "Blind %u calibration controls are locked; press Reset Blind Calibration first", servo_id);
+    return;
+  }
+  if (action == 0 || action == 1) {
+    const float amount = action == 0 ? servo->jog_increment : -servo->jog_increment;
+    if (!step(servo_id, amount)) {
+      servo->calibration_error = true;
+      publish_calibration_status_(*servo);
+    }
     return;
   }
   // Capture fresh telemetry here instead of using the most recent 500 ms poll.
@@ -620,17 +642,23 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   uint8_t feedback[11];
   if (!read_register_(servo_id, REG_PRESENT_POSITION, feedback, sizeof(feedback))) {
     ESP_LOGW(TAG, "Cannot save calibration for servo %u: position read failed", servo_id);
+    servo->calibration_error = true;
+    publish_calibration_status_(*servo);
     return;
   }
   servo->hardware_position_raw = decode_signed_(decode_u16_(&feedback[0]), 15);
   servo->moving = feedback[10] != 0;
   if (servo->moving) {
     ESP_LOGW(TAG, "Cannot save calibration for servo %u while it is still moving", servo_id);
+    servo->calibration_error = true;
+    publish_calibration_status_(*servo);
     return;
   }
   if (servo->command_active) {
     if (millis() - servo->command_started < 250) {
       ESP_LOGW(TAG, "Cannot save calibration for servo %u until the current move completes", servo_id);
+      servo->calibration_error = true;
+      publish_calibration_status_(*servo);
       return;
     }
     servo->position_raw = servo->target_raw;
@@ -639,6 +667,7 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   if (action == 2) { servo->calibration_down = servo->position_raw; servo->calibration_mask |= 0x01; }
   if (action == 3) { servo->calibration_middle = servo->position_raw; servo->calibration_mask |= 0x02; }
   if (action == 4) { servo->calibration_up = servo->position_raw; servo->calibration_mask |= 0x04; }
+  servo->calibration_error = false;
   const char *point_name = action == 2 ? "down" : (action == 3 ? "middle" : "up");
   ESP_LOGI(TAG, "Saved servo %u %s calibration point: raw=%ld (%.1f degrees)", servo_id,
            point_name, static_cast<long>(servo->position_raw),
@@ -648,6 +677,7 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     const int32_t middle_offset = servo->calibration_middle - servo->calibration_down;
     if (span == 0 || (span > 0 && (middle_offset <= 0 || middle_offset >= span)) ||
         (span < 0 && (middle_offset >= 0 || middle_offset <= span))) {
+      servo->calibration_error = true;
       ESP_LOGE(TAG,
                "Servo %u calibration invalid: middle must be strictly between down and up "
                "(down=%ld middle=%ld up=%ld)",
@@ -659,6 +689,7 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     ESP_LOGI(TAG, "Servo %u blind calibration complete; point buttons locked and cover enabled", servo_id);
   }
   save_preferences_(*servo);
+  publish_calibration_status_(*servo);
   update_cover_(*servo);
 }
 
@@ -693,6 +724,38 @@ void STS3215Component::command_all_covers(float position) {
   for (auto &servo : servos_)
     if (calibrated_(servo))
       command_cover(servo.id, position);
+  update_group_cover_();
+}
+
+void STS3215Component::step_cover(uint8_t servo_id, bool increase) {
+  auto *servo = find_servo_(servo_id);
+  if (servo == nullptr) return;
+  if (!calibrated_(*servo)) {
+    ESP_LOGW(TAG, "Servo %u cover step ignored: down/middle/up calibration is incomplete", servo_id);
+    return;
+  }
+  int32_t planned_target;
+  pending_target_(*servo, planned_target);
+  float target_tilt = 0.0f;
+  bool target_set = false;
+  for (int quarter = 0; quarter <= 4; quarter++) {
+    const float tilt = static_cast<float>(quarter) / 4.0f;
+    if (planned_target == raw_for_cover_position_(*servo, tilt)) {
+      const int next_quarter = std::max(0, std::min(4, quarter + (increase ? 1 : -1)));
+      target_tilt = static_cast<float>(next_quarter) / 4.0f;
+      target_set = true;
+      break;
+    }
+  }
+  if (!target_set)
+    target_tilt = next_cover_quarter(cover_position_for_raw_(*servo, planned_target), increase);
+  command_cover(servo_id, target_tilt);
+}
+
+void STS3215Component::step_all_covers(bool increase) {
+  for (auto &servo : servos_)
+    if (calibrated_(servo))
+      step_cover(servo.id, increase);
   update_group_cover_();
 }
 
@@ -770,6 +833,18 @@ void STS3215Component::publish_settings_(STS3215Servo &servo) {
   if (servo.jog_increment_number != nullptr) servo.jog_increment_number->publish_state(servo.jog_increment);
 }
 
+void STS3215Component::publish_calibration_status_(STS3215Servo &servo) {
+  if (servo.calibration_status_sensor == nullptr) return;
+  const char *status = "None";
+  if (servo.calibration_error || (servo.calibration_mask == 0x07 && !calibrated_(servo)))
+    status = "Error";
+  else if (servo.calibration_unlocked)
+    status = "Active";
+  else if (calibrated_(servo))
+    status = "Ok";
+  servo.calibration_status_sensor->publish_state(status);
+}
+
 int32_t STS3215Component::raw_for_cover_position_(const STS3215Servo &servo, float position) const {
   if (position <= 0.5f)
     return static_cast<int32_t>(std::lround(servo.calibration_down +
@@ -839,12 +914,16 @@ cover::CoverTraits STS3215Cover::get_traits() {
   traits.set_supports_position(false);
   traits.set_supports_tilt(true);
   traits.set_supports_stop(true);
-  traits.set_is_assumed_state(false);
+  // Home Assistant models open/close as terminal commands. These blinds use
+  // them as repeatable 25% directional steps, so keep both controls enabled.
+  traits.set_is_assumed_state(true);
   return traits;
 }
 
 void STS3215Cover::control(const cover::CoverCall &call) {
   if (call.get_stop()) parent_->stop_servo(servo_id_);
+  if (call.get_position().has_value())
+    parent_->step_cover(servo_id_, *call.get_position() > 0.5f);
   if (call.get_tilt().has_value()) parent_->command_cover(servo_id_, *call.get_tilt());
 }
 
@@ -861,12 +940,14 @@ cover::CoverTraits STS3215GroupCover::get_traits() {
   traits.set_supports_position(false);
   traits.set_supports_tilt(true);
   traits.set_supports_stop(true);
-  traits.set_is_assumed_state(false);
+  traits.set_is_assumed_state(true);
   return traits;
 }
 
 void STS3215GroupCover::control(const cover::CoverCall &call) {
   if (call.get_stop()) parent_->stop_all();
+  if (call.get_position().has_value())
+    parent_->step_all_covers(*call.get_position() > 0.5f);
   if (call.get_tilt().has_value()) parent_->command_all_covers(*call.get_tilt());
 }
 

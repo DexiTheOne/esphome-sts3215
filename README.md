@@ -82,6 +82,10 @@ sts3215:
       multi_turn_mode:
         name: Multi-Turn Mode Active
       calibration:
+        reset_blinds:
+          name: Reset Calibration
+        status:
+          name: Calibration Status
         jog_increment:
           name: Jog Increment
         jog_forward:
@@ -144,8 +148,21 @@ either direction. Once all three points are valid, Home Assistant exposes a
 tilt control: 0% is closed in the down direction, 50% is the calibrated fully
 open position, and 100% is closed in the up direction. Calculated openness is
 0% at either endpoint and 100% at the middle. This piecewise mapping preserves
-an intentionally off-center middle point. Completing calibration locks the
-three point buttons; press **Reset Calibration** to deliberately start over.
+an intentionally off-center middle point. Completing calibration locks the jog
+and three point controls; press **Reset Calibration** to deliberately start
+over. ESPHome buttons cannot publish per-entity availability, so Home Assistant
+may continue to draw the locked buttons normally, but presses are rejected by
+the device until calibration is reset.
+
+The optional **Calibration Status** text sensor reports `None` before a
+calibration session, `Active` after Reset Calibration unlocks jogging and point
+capture, `Ok` when all three points form a valid sequence, or `Error` when a
+point cannot be captured or the three points are inconsistent. A successful
+retry clears a transient error; invalid saved points remain `Error` after a
+reboot until corrected or reset. The example exposes this sensor in the same
+device configuration group as Reset Calibration; Home Assistant controls the
+display order.
+
 Cover commands are ignored until calibration is complete. The logical zero is
 not changed again after the points are saved, because doing so would shift all
 three endpoints. Calibration is independent for every servo and survives ESP32
@@ -199,6 +216,17 @@ servos:
 The cover's tilt slider retains the physical orientation scale: both endpoints
 are fully closed and 50% is fully open. The component calculates the cover's
 open/closed state as 0% open at either endpoint and fully open at 50% tilt.
+
+The standard Home Assistant open and close controls move toward the next 25%
+tilt boundary instead of jumping to an endpoint. They snap in the requested
+direction: for example, open from 16% targets 25%, open from 25% targets 50%,
+and close from 26% targets 25%. Repeated presses use the latest queued target,
+so they can be used predictably while a move is still pending. Home Assistant's
+tilt slider and favorite tilt positions continue to command exact percentages.
+
+Home Assistant draws a slatted background for every tilt-position control. The
+frontend does not expose an entity capability or ESPHome option for disabling
+that decoration, so it cannot be changed by this external component.
 
 ## Multiple blinds and start sequencing
 

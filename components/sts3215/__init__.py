@@ -2,7 +2,7 @@ import zlib
 
 from esphome import automation
 import esphome.codegen as cg
-from esphome.components import binary_sensor, button, cover, number, sensor, uart
+from esphome.components import binary_sensor, button, cover, number, sensor, text_sensor, uart
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_ID, CONF_INVERTED, DEVICE_CLASS_CURRENT, DEVICE_CLASS_TEMPERATURE,
@@ -13,7 +13,7 @@ from esphome.const import (
 
 CODEOWNERS = []
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["binary_sensor", "button", "cover", "number", "sensor"]
+AUTO_LOAD = ["binary_sensor", "button", "cover", "number", "sensor", "text_sensor"]
 MULTI_CONF = True
 
 CONF_SERVOS = "servos"
@@ -46,6 +46,7 @@ CONF_SET_DOWN = "set_down"
 CONF_SET_MIDDLE = "set_middle"
 CONF_SET_UP = "set_up"
 CONF_RESET_BLINDS = "reset_blinds"
+CONF_CALIBRATION_STATUS = "status"
 CONF_INITIAL_SPEED = "initial_speed"
 CONF_INITIAL_ACCELERATION = "initial_acceleration"
 CONF_INITIAL_TORQUE_LIMIT = "initial_torque_limit"
@@ -82,6 +83,8 @@ def _unique_servo_ids(config):
 CALIBRATION_SCHEMA = cv.Schema({
     cv.Optional(CONF_RESET_BLINDS): button.button_schema(
         STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:restart-alert"),
+    cv.Optional(CONF_CALIBRATION_STATUS): text_sensor.text_sensor_schema(
+        entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:clipboard-check-outline"),
     cv.Optional(CONF_JOG_INCREMENT): number.number_schema(
         STS3215JogIncrementNumber, unit_of_measurement=UNIT_DEGREES,
         entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:rotate-360"),
@@ -243,6 +246,9 @@ async def to_code(config):
             cg.add(btn.set_action(5))
 
         if calibration := servo_config.get(CONF_CALIBRATION):
+            if CONF_CALIBRATION_STATUS in calibration:
+                status = await text_sensor.new_text_sensor(calibration[CONF_CALIBRATION_STATUS])
+                cg.add(var.set_calibration_status_sensor(servo_id, status))
             if CONF_JOG_INCREMENT in calibration:
                 jog = await _new_number(calibration[CONF_JOG_INCREMENT], var, servo_id,
                                         0.1, 2520.0, 0.1)

@@ -9,6 +9,7 @@
 #include "esphome/components/cover/cover.h"
 #include "esphome/components/number/number.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
@@ -157,6 +158,7 @@ struct STS3215Servo {
   int32_t calibration_up{0};
   uint8_t calibration_mask{0};
   bool calibration_unlocked{false};
+  bool calibration_error{false};
   bool moving{false};
   bool moving_seen{false};
   bool command_active{false};
@@ -179,6 +181,7 @@ struct STS3215Servo {
   STS3215AccelerationNumber *acceleration_number{nullptr};
   STS3215TorqueLimitNumber *torque_limit_number{nullptr};
   STS3215JogIncrementNumber *jog_increment_number{nullptr};
+  text_sensor::TextSensor *calibration_status_sensor{nullptr};
   STS3215Cover *cover{nullptr};
 };
 
@@ -216,6 +219,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_acceleration_number(uint8_t, STS3215AccelerationNumber *);
   void set_torque_limit_number(uint8_t, STS3215TorqueLimitNumber *);
   void set_jog_increment_number(uint8_t, STS3215JogIncrementNumber *);
+  void set_calibration_status_sensor(uint8_t, text_sensor::TextSensor *);
   void set_cover(uint8_t, STS3215Cover *);
   void set_group_cover(STS3215GroupCover *value) { group_cover_ = value; }
 
@@ -229,6 +233,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void calibration_action(uint8_t servo_id, uint8_t action);
   void command_cover(uint8_t servo_id, float position);
   void command_all_covers(float position);
+  void step_cover(uint8_t servo_id, bool increase);
+  void step_all_covers(bool increase);
   void stop_servo(uint8_t servo_id);
   void stop_all();
 
@@ -264,6 +270,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void load_preferences_(STS3215Servo &servo);
   void save_preferences_(STS3215Servo &servo);
   void publish_settings_(STS3215Servo &servo);
+  void publish_calibration_status_(STS3215Servo &servo);
   void update_cover_(STS3215Servo &servo);
   void update_group_cover_();
   void process_commissioning_();
