@@ -1,0 +1,14 @@
+# Add this block to Home Assistant's configuration.yaml, not to ESPHome.
+# Verify the entity IDs in Developer Tools > States before using it; renaming
+# the device or entities in Home Assistant may change the prefix below.
+#
+# Keep the cover, calibrated encoder position, and calibration status recorded.
+# Omit high-frequency raw encoder and motor telemetry from the recorder while
+# keeping those entities live and available for dashboards and automations.
+recorder:
+  exclude:
+    entity_globs:
+      - sensor.common_area_sts3215_blind_demo_blind_*_encoder_position_raw
+      - sensor.common_area_sts3215_blind_demo_blind_*_servo_*
+      - binary_sensor.common_area_sts3215_blind_demo_blind_*_servo_moving
+      - binary_sensor.common_area_sts3215_blind_demo_blind_*_torque_enabled
