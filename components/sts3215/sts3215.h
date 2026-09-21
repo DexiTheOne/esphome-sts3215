@@ -104,6 +104,18 @@ class STS3215CalibrationButton : public button::Button {
   uint8_t action_{0};
 };
 
+class STS3215PresetButton : public button::Button {
+ public:
+  void set_parent(STS3215Component *parent) { parent_ = parent; }
+  void set_servo_id(uint8_t value) { servo_id_ = value; }
+  void set_tilt(float value) { tilt_ = value; }
+ protected:
+  void press_action() override;
+  STS3215Component *parent_{nullptr};
+  uint8_t servo_id_{0};
+  float tilt_{0.5f};
+};
+
 struct STS3215PreferenceData {
   uint32_t version;
   float speed_limit;

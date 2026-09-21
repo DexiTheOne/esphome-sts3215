@@ -175,6 +175,30 @@ tilt automatically queues 0% first and then the requested tilt. Movement toward
 100%, and commands directly to 0%, remain direct. Home Assistant displays only
 the final requested tilt throughout this sequence.
 
+Home Assistant does not define native named presets for cover entities, so the
+component can expose preset buttons that use the same buffered, gravity-aware
+tilt command path:
+
+```yaml
+servos:
+  - servo_id: 1
+    presets:
+      - name: Blind 1 Closed Down 0%
+        tilt_position: 0%
+      - name: Blind 1 Tilt 25%
+        tilt_position: 25%
+      - name: Blind 1 Fully Open 50%
+        tilt_position: 50%
+      - name: Blind 1 Tilt 75%
+        tilt_position: 75%
+      - name: Blind 1 Closed Up 100%
+        tilt_position: 100%
+```
+
+The cover's tilt slider retains the physical orientation scale: both endpoints
+are fully closed and 50% is fully open. The component calculates the cover's
+open/closed state as 0% open at either endpoint and fully open at 50% tilt.
+
 ## Multiple blinds and start sequencing
 
 `start_delay` is enforced by one queue shared by all individual covers and the

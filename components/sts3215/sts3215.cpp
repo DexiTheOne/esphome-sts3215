@@ -882,6 +882,10 @@ void STS3215CalibrationButton::press_action() {
   if (parent_ != nullptr) parent_->calibration_action(servo_id_, action_);
 }
 
+void STS3215PresetButton::press_action() {
+  if (parent_ != nullptr) parent_->command_cover(servo_id_, tilt_);
+}
+
 void STS3215PositionNumber::control(float value) {
   const float clean = std::round(value * 10.0f) / 10.0f;
   if (parent_ != nullptr && parent_->command_position(servo_id_, clean)) publish_state(clean);

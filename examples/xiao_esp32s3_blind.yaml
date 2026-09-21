@@ -64,6 +64,17 @@ sts3215:
       gravity_return_to_zero: true
       cover:
         name: Blind 1
+      presets:
+        - name: Blind 1 Closed Down 0%
+          tilt_position: 0%
+        - name: Blind 1 Tilt 25%
+          tilt_position: 25%
+        - name: Blind 1 Fully Open 50%
+          tilt_position: 50%
+        - name: Blind 1 Tilt 75%
+          tilt_position: 75%
+        - name: Blind 1 Closed Up 100%
+          tilt_position: 100%
       # Press once during commissioning. It verifies mode, Phase bit 4, and the
       # multi-turn limits; once all pass, later presses perform no EEPROM write.
       commission_step_mode:

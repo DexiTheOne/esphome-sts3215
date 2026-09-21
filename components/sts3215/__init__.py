@@ -52,6 +52,8 @@ CONF_INITIAL_TORQUE_LIMIT = "initial_torque_limit"
 CONF_GRAVITY_RETURN_TO_ZERO = "gravity_return_to_zero"
 CONF_COMMISSION_STEP_MODE = "commission_step_mode"
 CONF_MULTI_TURN_MODE = "multi_turn_mode"
+CONF_PRESETS = "presets"
+CONF_TILT_POSITION = "tilt_position"
 
 sts3215_ns = cg.esphome_ns.namespace("sts3215")
 STS3215Component = sts3215_ns.class_("STS3215Component", cg.PollingComponent, uart.UARTDevice)
@@ -63,6 +65,7 @@ STS3215JogIncrementNumber = sts3215_ns.class_("STS3215JogIncrementNumber", numbe
 STS3215Cover = sts3215_ns.class_("STS3215Cover", cover.Cover)
 STS3215GroupCover = sts3215_ns.class_("STS3215GroupCover", cover.Cover)
 STS3215CalibrationButton = sts3215_ns.class_("STS3215CalibrationButton", button.Button)
+STS3215PresetButton = sts3215_ns.class_("STS3215PresetButton", button.Button)
 STS3215StepAction = sts3215_ns.class_("STS3215StepAction", automation.Action)
 
 
@@ -92,6 +95,12 @@ CALIBRATION_SCHEMA = cv.Schema({
         STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:arrow-collapse-vertical"),
     cv.Optional(CONF_SET_UP): button.button_schema(
         STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:arrow-collapse-up"),
+})
+
+PRESET_SCHEMA = button.button_schema(
+    STS3215PresetButton, icon="mdi:blinds-horizontal"
+).extend({
+    cv.Required(CONF_TILT_POSITION): cv.percentage,
 })
 
 SERVO_SCHEMA = cv.Schema({
@@ -146,6 +155,7 @@ SERVO_SCHEMA = cv.Schema({
         STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG,
         icon="mdi:memory-arrow-down"),
     cv.Optional(CONF_CALIBRATION): CALIBRATION_SCHEMA,
+    cv.Optional(CONF_PRESETS): cv.ensure_list(PRESET_SCHEMA),
 })
 
 CONFIG_SCHEMA = cv.All(
@@ -247,6 +257,12 @@ async def to_code(config):
                     cg.add(btn.set_parent(var))
                     cg.add(btn.set_servo_id(servo_id))
                     cg.add(btn.set_action(action))
+
+        for preset_config in servo_config.get(CONF_PRESETS, []):
+            preset = await button.new_button(preset_config)
+            cg.add(preset.set_parent(var))
+            cg.add(preset.set_servo_id(servo_id))
+            cg.add(preset.set_tilt(preset_config[CONF_TILT_POSITION]))
 
     if CONF_MAIN_COVER in config:
         group = await cover.new_cover(config[CONF_MAIN_COVER])
