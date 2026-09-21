@@ -170,10 +170,11 @@ servos:
     gravity_return_to_zero: true
 ```
 
-With this option, a command from the 100% closed-up side to an intermediate
-tilt automatically queues 0% first and then the requested tilt. Movement toward
-100%, and commands directly to 0%, remain direct. Home Assistant displays only
-the final requested tilt throughout this sequence.
+With this option, every decreasing tilt command to a value above 0% automatically
+queues 0% first and then the requested tilt. For example, 75% to 25% runs as
+75% to 0% to 25%. Increasing transitions, and commands directly to 0%, remain
+direct. Home Assistant displays only the final requested tilt throughout this
+sequence.
 
 Home Assistant does not define native named presets for cover entities, so the
 component can expose preset buttons that use the same buffered, gravity-aware

@@ -674,8 +674,8 @@ void STS3215Component::command_cover(uint8_t servo_id, float position) {
   pending_target_(*servo, previous_target);
   const float previous_tilt = cover_position_for_raw_(*servo, previous_target);
   const int32_t target_raw = raw_for_cover_position_(*servo, position);
-  if (servo->gravity_return_to_zero && previous_tilt >= 0.999f &&
-      position > 0.001f && position < previous_tilt) {
+  if (servo->gravity_return_to_zero && position > 0.001f &&
+      position < previous_tilt - 0.001f) {
     enqueue_cover_sequence_(servo_id, raw_for_cover_position_(*servo, 0.0f), target_raw);
     ESP_LOGD(TAG, "Servo %u gravity sequence queued: 0%% then %.0f%% tilt", servo_id, position * 100.0f);
   } else {
