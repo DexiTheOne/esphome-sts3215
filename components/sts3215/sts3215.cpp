@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "esphome/core/log.h"
+#include "esphome/core/alloc_helpers.h"
 
 namespace esphome {
 namespace sts3215 {
@@ -290,7 +291,24 @@ float STS3215Component::speed_to_degrees_(int16_t raw, bool inverted) {
 
 void STS3215Component::clear_rx_() {
   uint8_t ignored;
-  while (available() && read_byte(&ignored)) {}
+  uint8_t discarded[64];
+  size_t count = 0;
+  while (available() && read_byte(&ignored)) {
+    if (uart_trace_) {
+      discarded[count++] = ignored;
+      if (count == sizeof(discarded)) {
+        log_uart_bytes_("RX discarded", discarded, count);
+        count = 0;
+      }
+    }
+  }
+  if (count != 0) log_uart_bytes_("RX discarded", discarded, count);
+}
+
+void STS3215Component::log_uart_bytes_(const char *label, const uint8_t *data, size_t length) {
+  if (uart_trace_)
+    ESP_LOGD(TAG, "UART %s (%u bytes): %s", label, static_cast<unsigned>(length),
+             format_hex_pretty(data, length, ' ', false).c_str());
 }
 
 bool STS3215Component::read_byte_timeout_(uint8_t *data, uint32_t deadline) {
@@ -304,17 +322,35 @@ bool STS3215Component::read_byte_timeout_(uint8_t *data, uint32_t deadline) {
 
 bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, uint8_t expected_length) {
   const uint32_t deadline = millis() + response_timeout_ms_;
+  uint8_t received[128];
+  size_t received_count = 0;
+  auto read_traced = [&](uint8_t *value) {
+    if (!read_byte_timeout_(value, deadline)) return false;
+    if (uart_trace_) {
+      if (received_count == sizeof(received)) {
+        log_uart_bytes_("RX stream", received, received_count);
+        received_count = 0;
+      }
+      received[received_count++] = *value;
+    }
+    return true;
+  };
+  auto log_received = [&]() {
+    if (received_count != 0) log_uart_bytes_("RX stream", received, received_count);
+  };
   uint8_t byte = 0, previous = 0;
-  while (read_byte_timeout_(&byte, deadline)) {
+  while (read_traced(&byte)) {
     if (previous != 0xFF || byte != 0xFF) {
       previous = byte;
       continue;
     }
     previous = 0;
     uint8_t id, packet_length, error;
-    if (!read_byte_timeout_(&id, deadline) || !read_byte_timeout_(&packet_length, deadline) ||
-        !read_byte_timeout_(&error, deadline))
+    if (!read_traced(&id) || !read_traced(&packet_length) ||
+        !read_traced(&error)) {
+      log_received();
       return false;
+    }
     if (packet_length < 2 || packet_length > 64) continue;
 
     const bool expected = id == expected_id && packet_length == expected_length + 2;
@@ -323,12 +359,18 @@ bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, u
     // complete packets so a late write acknowledgement cannot be mistaken for
     // the read response that follows it.
     for (uint8_t i = 0; i < packet_length - 2; i++) {
-      if (!read_byte_timeout_(&byte, deadline)) return false;
+      if (!read_traced(&byte)) {
+        log_received();
+        return false;
+      }
       checksum_sum += byte;
       if (expected) data[i] = byte;
     }
     uint8_t received_checksum;
-    if (!read_byte_timeout_(&received_checksum, deadline)) return false;
+    if (!read_traced(&received_checksum)) {
+      log_received();
+      return false;
+    }
     if (static_cast<uint8_t>(~checksum_sum) != received_checksum) {
       ESP_LOGW(TAG, "Checksum error in response from servo %u", id);
       continue;
@@ -342,8 +384,10 @@ bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, u
     }
     if (error != 0)
       ESP_LOGW(TAG, "Servo %u returned status flags 0x%02X", expected_id, error);
+    log_received();
     return true;
   }
+  log_received();
   return false;
 }
 
@@ -353,6 +397,7 @@ bool STS3215Component::read_register_(uint8_t servo_id, uint8_t address, uint8_t
   const uint8_t packet[] = {0xFF, 0xFF, servo_id, packet_length, INST_READ, address, length, checksum};
   for (uint8_t attempt = 0; attempt < 3; attempt++) {
     clear_rx_();
+    log_uart_bytes_("TX read", packet, sizeof(packet));
     write_array(packet, sizeof(packet));
     flush();
     if (read_status_packet_(servo_id, data, length)) {
@@ -360,6 +405,9 @@ bool STS3215Component::read_register_(uint8_t servo_id, uint8_t address, uint8_t
         ESP_LOGD(TAG, "Servo %u register %u read succeeded on attempt %u", servo_id, address, attempt + 1);
       return true;
     }
+    if (uart_trace_)
+      ESP_LOGD(TAG, "UART RX timeout: ID %u register %u length %u attempt %u",
+               servo_id, address, length, attempt + 1);
     delay(10);
   }
   return false;
@@ -378,6 +426,7 @@ bool STS3215Component::write_register_(uint8_t servo_id, uint8_t address,
     checksum_sum += data[i];
   }
   packet.push_back(static_cast<uint8_t>(~checksum_sum));
+  log_uart_bytes_("TX write", packet.data(), packet.size());
   write_array(packet.data(), packet.size());
   flush();
   return true;

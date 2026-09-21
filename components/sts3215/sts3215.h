@@ -206,6 +206,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_position_tolerance(uint16_t value) { position_tolerance_ = value; }
   void set_power_pin(GPIOPin *pin) { power_pin_ = pin; }
   void set_power_on_delay(uint32_t value) { power_on_delay_ms_ = value; }
+  void set_uart_trace(bool value) { uart_trace_ = value; }
   void add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,
                  float initial_speed, uint8_t initial_acceleration, float initial_torque,
                  bool gravity_return_to_zero);
@@ -266,6 +267,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool read_status_packet_(uint8_t, uint8_t *, uint8_t);
   bool read_byte_timeout_(uint8_t *, uint32_t);
   void clear_rx_();
+  void log_uart_bytes_(const char *label, const uint8_t *data, size_t length);
   void set_bus_power_(bool on);
   void initialize_powered_bus_();
   void invalidate_telemetry_();
@@ -319,6 +321,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   uint32_t power_on_at_{0};
   bool power_on_{false};
   bool power_ready_{false};
+  bool uart_trace_{false};
 
   enum CommissionState : uint8_t {
     COMMISSION_IDLE,

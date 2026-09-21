@@ -58,6 +58,7 @@ CONF_PRESETS = "presets"
 CONF_TILT_POSITION = "tilt_position"
 CONF_POWER_PIN = "power_pin"
 CONF_POWER_ON_DELAY = "power_on_delay"
+CONF_UART_TRACE = "uart_trace"
 
 sts3215_ns = cg.esphome_ns.namespace("sts3215")
 STS3215Component = sts3215_ns.class_("STS3215Component", cg.PollingComponent, uart.UARTDevice)
@@ -174,6 +175,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_POSITION_TOLERANCE, default=5): cv.int_range(min=1, max=1000),
         cv.Optional(CONF_POWER_PIN): pins.gpio_output_pin_schema,
         cv.Optional(CONF_POWER_ON_DELAY, default="1s"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_UART_TRACE, default=False): cv.boolean,
     }).extend(uart.UART_DEVICE_SCHEMA).extend(cv.polling_component_schema("500ms")),
     _unique_servo_ids,
 )
@@ -198,6 +200,7 @@ async def to_code(config):
     cg.add(var.set_move_timeout(config[CONF_MOVE_TIMEOUT].total_milliseconds))
     cg.add(var.set_position_tolerance(config[CONF_POSITION_TOLERANCE]))
     cg.add(var.set_power_on_delay(config[CONF_POWER_ON_DELAY].total_milliseconds))
+    cg.add(var.set_uart_trace(config[CONF_UART_TRACE]))
     if CONF_POWER_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_POWER_PIN])
         cg.add(var.set_power_pin(pin))
