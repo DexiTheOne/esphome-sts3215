@@ -535,11 +535,13 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   if (action == 1) { step(servo_id, -servo->jog_increment); return; }
   if (action == 5) { commission_step_mode(servo_id); return; }
   if (action == 6) {
-    if (!servo->has_position) {
-      ESP_LOGW(TAG, "Cannot reset blind %u calibration until position telemetry is available", servo_id);
+    stop_servo(servo_id);
+    uint8_t position[2];
+    if (!read_register_(servo_id, REG_PRESENT_POSITION, position, sizeof(position))) {
+      ESP_LOGW(TAG, "Cannot reset blind %u calibration: position read failed", servo_id);
       return;
     }
-    stop_servo(servo_id);
+    set_hardware_position_(*servo, decode_signed_(decode_u16_(position), 15));
     servo->position_offset = -servo->hardware_position_raw;
     servo->position_bias = servo->position_offset;
     servo->position_raw = 0;
@@ -561,21 +563,36 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     ESP_LOGW(TAG, "Blind %u calibration point is locked; press Reset Blind Calibration first", servo_id);
     return;
   }
-  if (!servo->has_position) {
-    ESP_LOGW(TAG, "Cannot save calibration for servo %u until position telemetry is available", servo_id);
+  // Capture fresh telemetry here instead of using the most recent 500 ms poll.
+  // Otherwise a point pressed immediately after a jog can save the old value.
+  uint8_t feedback[11];
+  if (!read_register_(servo_id, REG_PRESENT_POSITION, feedback, sizeof(feedback))) {
+    ESP_LOGW(TAG, "Cannot save calibration for servo %u: position read failed", servo_id);
+    return;
+  }
+  set_hardware_position_(*servo, decode_signed_(decode_u16_(&feedback[0]), 15));
+  servo->moving = feedback[10] != 0;
+  if (servo->moving) {
+    ESP_LOGW(TAG, "Cannot save calibration for servo %u while it is still moving", servo_id);
     return;
   }
   if (action == 2) { servo->calibration_down = servo->position_raw; servo->calibration_mask |= 0x01; }
   if (action == 3) { servo->calibration_middle = servo->position_raw; servo->calibration_mask |= 0x02; }
   if (action == 4) { servo->calibration_up = servo->position_raw; servo->calibration_mask |= 0x04; }
-  ESP_LOGI(TAG, "Saved servo %u calibration point at raw position %ld", servo_id,
-           static_cast<long>(servo->position_raw));
+  const char *point_name = action == 2 ? "down" : (action == 3 ? "middle" : "up");
+  ESP_LOGI(TAG, "Saved servo %u %s calibration point: raw=%ld (%.1f degrees)", servo_id,
+           point_name, static_cast<long>(servo->position_raw),
+           raw_to_degrees_(servo->position_raw, servo->inverted));
   if (servo->calibration_mask == 0x07 && !calibrated_(*servo)) {
     const int32_t span = servo->calibration_up - servo->calibration_down;
     const int32_t middle_offset = servo->calibration_middle - servo->calibration_down;
     if (span == 0 || (span > 0 && (middle_offset <= 0 || middle_offset >= span)) ||
         (span < 0 && (middle_offset >= 0 || middle_offset <= span))) {
-      ESP_LOGE(TAG, "Servo %u calibration invalid: middle must be strictly between down and up", servo_id);
+      ESP_LOGE(TAG,
+               "Servo %u calibration invalid: middle must be strictly between down and up "
+               "(down=%ld middle=%ld up=%ld)",
+               servo_id, static_cast<long>(servo->calibration_down),
+               static_cast<long>(servo->calibration_middle), static_cast<long>(servo->calibration_up));
     }
   } else if (servo->calibration_mask == 0x07) {
     servo->calibration_unlocked = false;
