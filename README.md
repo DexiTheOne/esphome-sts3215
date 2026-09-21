@@ -218,9 +218,13 @@ not changed again after the points are saved, because doing so would shift all
 three endpoints. Calibration is independent for every servo and survives ESP32
 resets. The last completed position is also saved; on
 startup the component restores that logical position because the worm drive
-cannot back-drive while power is off. In Mode 3 the servo reports progress for
-the current relative move and returns its position counter to zero afterward,
-so the ESP32 maintains the accumulated blind position.
+cannot back-drive while power is off. In Mode 3 the servo reports the signed
+distance remaining in the current move and returns its position counter to
+zero afterward, so the ESP32 maintains the accumulated blind position.
+Firmware upgrades from preference version 2 clear saved position and blind
+calibration because the earlier feedback interpretation could persist incorrect
+coordinates. Speed, acceleration, torque limit, and jog increment are retained;
+press Reset Calibration and establish all three points again after upgrading.
 This assumes the worm gearbox holds the blind still while unpowered. A stalled
 or interrupted move, or manual movement with power off, can make the saved
 position inaccurate; reset calibration before relying on its endpoints again.

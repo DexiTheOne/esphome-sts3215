@@ -479,11 +479,11 @@ void STS3215Component::poll_servo_(STS3215Servo &servo) {
   servo.moving = feedback[10] != 0;
   if (servo.command_active) {
     if (servo.moving || hardware_position != 0) {
-      servo.moving_seen = true;
-      // Mode 3 reports progress for the current relative move and returns to
-      // zero afterward. Convert that progress into the persistent logical
-      // blind coordinate maintained by the ESP32.
-      servo.position_raw = servo.move_start_raw + hardware_position;
+      // Mode 3 reports the remaining signed distance, not the distance
+      // already traveled. It starts at the commanded delta and reaches zero.
+      if (servo.moving || std::abs(hardware_position) < std::abs(servo.target_raw - servo.move_start_raw))
+        servo.moving_seen = true;
+      servo.position_raw = servo.target_raw - hardware_position;
     } else if (servo.moving_seen) {
       servo.position_raw = servo.target_raw;
     }
@@ -1021,18 +1021,25 @@ void STS3215Component::stop_all() {
 
 void STS3215Component::load_preferences_(STS3215Servo &servo) {
   STS3215PreferenceData data{};
-  if (servo.preference.load(&data) && data.version == PREFERENCE_VERSION) {
+  const bool loaded = servo.preference.load(&data);
+  const bool legacy = loaded && data.version == 2;
+  if (loaded && (data.version == PREFERENCE_VERSION || legacy)) {
     servo.speed_limit_display = data.speed_limit;
     servo.torque_limit_display = data.torque_limit;
     servo.jog_increment = data.jog_increment;
     servo.acceleration_raw = data.acceleration;
-    servo.calibration_down = data.down;
-    servo.calibration_middle = data.middle;
-    servo.calibration_up = data.up;
-    servo.calibration_mask = data.calibration_mask;
-    servo.calibration_unlocked = data.reserved != 0;
-    servo.saved_position = data.last_position;
-    servo.saved_position_valid = data.last_position_valid != 0;
+    if (!legacy) {
+      servo.calibration_down = data.down;
+      servo.calibration_middle = data.middle;
+      servo.calibration_up = data.up;
+      servo.calibration_mask = data.calibration_mask;
+      servo.calibration_unlocked = data.reserved != 0;
+      servo.saved_position = data.last_position;
+      servo.saved_position_valid = data.last_position_valid != 0;
+    } else {
+      ESP_LOGW(TAG, "Servo %u calibration and saved position cleared after Mode 3 feedback correction; recalibrate",
+               servo.id);
+    }
   } else {
     servo.speed_limit_display = std::round(servo.default_speed);
     servo.torque_limit_display = std::round(servo.default_torque);
@@ -1041,6 +1048,7 @@ void STS3215Component::load_preferences_(STS3215Servo &servo) {
   }
   servo.speed_limit_raw = speed_to_raw_(servo.speed_limit_display);
   servo.torque_limit_raw = static_cast<uint16_t>(servo.torque_limit_display * 10.0f);
+  if (legacy) save_preferences_(servo);
 }
 
 void STS3215Component::save_preferences_(STS3215Servo &servo) {

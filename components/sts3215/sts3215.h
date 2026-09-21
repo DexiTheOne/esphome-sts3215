@@ -259,7 +259,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   static constexpr uint8_t REG_EEPROM_LOCK = 55;
   static constexpr uint8_t REG_PRESENT_POSITION = 56;
   static constexpr float STEPS_PER_REVOLUTION = 4096.0f;
-  static constexpr uint32_t PREFERENCE_VERSION = 2;
+  static constexpr uint32_t PREFERENCE_VERSION = 3;
 
   STS3215Servo *find_servo_(uint8_t servo_id);
   bool read_register_(uint8_t, uint8_t, uint8_t *, uint8_t);
