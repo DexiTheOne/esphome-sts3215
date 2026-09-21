@@ -66,8 +66,9 @@ void STS3215Component::dump_config() {
   ESP_LOGCONFIG(TAG, "  Inter-motor start delay: %u ms", static_cast<unsigned>(start_delay_ms_));
   ESP_LOGCONFIG(TAG, "  Move timeout: %u ms", static_cast<unsigned>(move_timeout_ms_));
   for (const auto &servo : servos_)
-    ESP_LOGCONFIG(TAG, "  Servo ID %u%s; calibration %s", servo.id,
-                  servo.inverted ? " (inverted)" : "", calibrated_(servo) ? "complete" : "incomplete");
+    ESP_LOGCONFIG(TAG, "  Servo ID %u%s; calibration %s; gravity return %s", servo.id,
+                  servo.inverted ? " (inverted)" : "", calibrated_(servo) ? "complete" : "incomplete",
+                  YESNO(servo.gravity_return_to_zero));
 }
 
 void STS3215Component::update() {
@@ -77,8 +78,10 @@ void STS3215Component::update() {
 }
 
 void STS3215Component::add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,
-                                 float initial_speed, uint8_t initial_acceleration, float initial_torque) {
-  servos_.push_back({servo_id, inverted, preference_key, initial_speed, initial_acceleration, initial_torque});
+                                 float initial_speed, uint8_t initial_acceleration, float initial_torque,
+                                 bool gravity_return_to_zero) {
+  servos_.push_back({servo_id, inverted, preference_key, initial_speed, initial_acceleration,
+                     initial_torque, gravity_return_to_zero});
 }
 
 STS3215Servo *STS3215Component::find_servo_(uint8_t servo_id) {
@@ -345,9 +348,30 @@ void STS3215Component::enqueue_move_(uint8_t servo_id, int32_t target_raw) {
       [servo_id](const STS3215QueuedMove &move) { return move.servo_id == servo_id; });
   if (existing != move_queue_.end()) {
     existing->target_raw = target_raw;
+    move_queue_.erase(std::remove_if(std::next(existing), move_queue_.end(),
+        [servo_id](const STS3215QueuedMove &move) { return move.servo_id == servo_id; }), move_queue_.end());
   } else {
     move_queue_.push_back({servo_id, target_raw});
   }
+}
+
+void STS3215Component::enqueue_cover_sequence_(uint8_t servo_id, int32_t intermediate_raw,
+                                               int32_t target_raw) {
+  remove_queued_(servo_id);
+  move_queue_.push_back({servo_id, intermediate_raw});
+  move_queue_.push_back({servo_id, target_raw});
+}
+
+bool STS3215Component::pending_target_(const STS3215Servo &servo, int32_t &target_raw) const {
+  bool pending = servo.command_active;
+  target_raw = pending ? servo.target_raw : servo.position_raw;
+  const auto queued = std::find_if(move_queue_.rbegin(), move_queue_.rend(),
+      [&servo](const STS3215QueuedMove &move) { return move.servo_id == servo.id; });
+  if (queued != move_queue_.rend()) {
+    pending = true;
+    target_raw = queued->target_raw;
+  }
+  return pending;
 }
 
 void STS3215Component::remove_queued_(uint8_t servo_id) {
@@ -374,10 +398,8 @@ bool STS3215Component::step(uint8_t servo_id, float degrees) {
     set_hardware_position_(*servo, decode_signed_(decode_u16_(data), 15));
   }
   const int32_t delta = degrees_to_raw_(degrees, servo->inverted);
-  int32_t planned_target = servo->command_active ? servo->target_raw : servo->position_raw;
-  const auto queued = std::find_if(move_queue_.begin(), move_queue_.end(),
-      [servo_id](const STS3215QueuedMove &move) { return move.servo_id == servo_id; });
-  if (queued != move_queue_.end()) planned_target = queued->target_raw;
+  int32_t planned_target;
+  pending_target_(*servo, planned_target);
   enqueue_move_(servo_id, planned_target + delta);
   return true;
 }
@@ -648,12 +670,22 @@ void STS3215Component::command_cover(uint8_t servo_id, float position) {
     return;
   }
   position = std::max(0.0f, std::min(1.0f, position));
-  enqueue_move_(servo_id, raw_for_cover_position_(*servo, position));
+  int32_t previous_target;
+  pending_target_(*servo, previous_target);
+  const float previous_tilt = cover_position_for_raw_(*servo, previous_target);
+  const int32_t target_raw = raw_for_cover_position_(*servo, position);
+  if (servo->gravity_return_to_zero && previous_tilt >= 0.999f &&
+      position > 0.001f && position < previous_tilt) {
+    enqueue_cover_sequence_(servo_id, raw_for_cover_position_(*servo, 0.0f), target_raw);
+    ESP_LOGD(TAG, "Servo %u gravity sequence queued: 0%% then %.0f%% tilt", servo_id, position * 100.0f);
+  } else {
+    enqueue_move_(servo_id, target_raw);
+  }
   if (servo->cover != nullptr) {
-    const float current = cover_position_for_raw_(*servo, servo->position_raw);
-    const auto operation = tilt_openness(position) >= tilt_openness(current)
+    const float current_tilt = cover_position_for_raw_(*servo, servo->position_raw);
+    const auto operation = tilt_openness(position) >= tilt_openness(current_tilt)
         ? cover::COVER_OPERATION_OPENING : cover::COVER_OPERATION_CLOSING;
-    servo->cover->update_from_parent(current, tilt_openness(current), operation);
+    servo->cover->update_from_parent(position, tilt_openness(position), operation);
   }
 }
 
@@ -661,6 +693,7 @@ void STS3215Component::command_all_covers(float position) {
   for (auto &servo : servos_)
     if (calibrated_(servo))
       command_cover(servo.id, position);
+  update_group_cover_();
 }
 
 void STS3215Component::stop_servo(uint8_t servo_id) {
@@ -760,25 +793,17 @@ float STS3215Component::cover_position_for_raw_(const STS3215Servo &servo, int32
 
 void STS3215Component::update_cover_(STS3215Servo &servo) {
   if (servo.cover == nullptr || !servo.has_position || !calibrated_(servo)) return;
-  bool pending = servo.command_active;
-  int32_t pending_target = servo.target_raw;
-  if (!pending) {
-    const auto queued = std::find_if(move_queue_.begin(), move_queue_.end(),
-        [&servo](const STS3215QueuedMove &move) { return move.servo_id == servo.id; });
-    if (queued != move_queue_.end()) {
-      pending = true;
-      pending_target = queued->target_raw;
-    }
-  }
+  int32_t pending_target;
+  const bool pending = pending_target_(servo, pending_target);
   cover::CoverOperation operation = cover::COVER_OPERATION_IDLE;
+  const float current_tilt = cover_position_for_raw_(servo, servo.position_raw);
+  float reported_tilt = current_tilt;
   if (pending) {
-    const float current = cover_position_for_raw_(servo, servo.position_raw);
-    const float target = cover_position_for_raw_(servo, pending_target);
-    operation = tilt_openness(target) >= tilt_openness(current)
+    reported_tilt = cover_position_for_raw_(servo, pending_target);
+    operation = tilt_openness(reported_tilt) >= tilt_openness(current_tilt)
         ? cover::COVER_OPERATION_OPENING : cover::COVER_OPERATION_CLOSING;
   }
-  const float tilt = cover_position_for_raw_(servo, servo.position_raw);
-  servo.cover->update_from_parent(tilt, tilt_openness(tilt), operation);
+  servo.cover->update_from_parent(reported_tilt, tilt_openness(reported_tilt), operation);
 }
 
 void STS3215Component::update_group_cover_() {
@@ -789,22 +814,15 @@ void STS3215Component::update_group_cover_() {
   bool opening = false, closing = false;
   for (const auto &servo : servos_) {
     if (!servo.has_position || !calibrated_(servo)) continue;
-    const float tilt = cover_position_for_raw_(servo, servo.position_raw);
-    tilt_sum += tilt;
-    openness_sum += tilt_openness(tilt);
+    const float current_tilt = cover_position_for_raw_(servo, servo.position_raw);
+    float reported_tilt = current_tilt;
+    int32_t target;
+    const bool pending = pending_target_(servo, target);
+    if (pending) reported_tilt = cover_position_for_raw_(servo, target);
+    tilt_sum += reported_tilt;
+    openness_sum += tilt_openness(reported_tilt);
     count++;
-    int32_t target = servo.target_raw;
-    bool pending = servo.command_active;
-    if (!pending) {
-      const auto queued = std::find_if(move_queue_.begin(), move_queue_.end(),
-          [&servo](const STS3215QueuedMove &move) { return move.servo_id == servo.id; });
-      if (queued != move_queue_.end()) {
-        pending = true;
-        target = queued->target_raw;
-      }
-    }
     if (pending) {
-      const float current_tilt = cover_position_for_raw_(servo, servo.position_raw);
       const float target_tilt = cover_position_for_raw_(servo, target);
       opening |= tilt_openness(target_tilt) >= tilt_openness(current_tilt);
       closing |= tilt_openness(target_tilt) < tilt_openness(current_tilt);

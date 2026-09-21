@@ -59,6 +59,9 @@ sts3215:
       initial_speed: 90
       initial_acceleration: 20
       initial_torque_limit: 30
+      # When leaving the 100% closed-up side for an intermediate tilt, first
+      # travel through 0% so gravity settles the blind leaves consistently.
+      gravity_return_to_zero: true
       cover:
         name: Blind 1
       # Press once during commissioning. It verifies mode, Phase bit 4, and the

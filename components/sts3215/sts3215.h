@@ -126,6 +126,7 @@ struct STS3215Servo {
   float default_speed;
   uint8_t default_acceleration;
   float default_torque;
+  bool gravity_return_to_zero;
   bool has_position{false};
   int32_t position_raw{0};
   int32_t hardware_position_raw{0};
@@ -185,7 +186,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_move_timeout(uint32_t value) { move_timeout_ms_ = value; }
   void set_position_tolerance(uint16_t value) { position_tolerance_ = value; }
   void add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,
-                 float initial_speed, uint8_t initial_acceleration, float initial_torque);
+                 float initial_speed, uint8_t initial_acceleration, float initial_torque,
+                 bool gravity_return_to_zero);
   void set_position_sensor(uint8_t, sensor::Sensor *);
   void set_position_raw_sensor(uint8_t, sensor::Sensor *);
   void set_speed_sensor(uint8_t, sensor::Sensor *);
@@ -244,7 +246,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void begin_move_(STS3215Servo &servo, int32_t target_raw);
   void finish_move_(STS3215Servo &servo, bool timed_out);
   void enqueue_move_(uint8_t servo_id, int32_t target_raw);
+  void enqueue_cover_sequence_(uint8_t servo_id, int32_t intermediate_raw, int32_t target_raw);
   void remove_queued_(uint8_t servo_id);
+  bool pending_target_(const STS3215Servo &servo, int32_t &target_raw) const;
   void load_preferences_(STS3215Servo &servo);
   void save_preferences_(STS3215Servo &servo);
   void publish_settings_(STS3215Servo &servo);

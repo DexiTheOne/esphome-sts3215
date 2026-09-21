@@ -158,6 +158,22 @@ so the ESP32 maintains the accumulated blind position.
 Torque is enabled immediately before a queued move starts and disabled when
 the target is reached, motion stops, or `move_timeout` expires. The status
 entities expose encoder position, moving state, and actual torque-enable state.
+While moving, the Home Assistant cover entity continues to report the final
+requested tilt instead of publishing intermediate progress. Live progress stays
+available through the position diagnostics.
+
+For blind leaves that settle by gravity, enable this per servo:
+
+```yaml
+servos:
+  - servo_id: 1
+    gravity_return_to_zero: true
+```
+
+With this option, a command from the 100% closed-up side to an intermediate
+tilt automatically queues 0% first and then the requested tilt. Movement toward
+100%, and commands directly to 0%, remain direct. Home Assistant displays only
+the final requested tilt throughout this sequence.
 
 ## Multiple blinds and start sequencing
 

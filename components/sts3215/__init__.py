@@ -49,6 +49,7 @@ CONF_RESET_BLINDS = "reset_blinds"
 CONF_INITIAL_SPEED = "initial_speed"
 CONF_INITIAL_ACCELERATION = "initial_acceleration"
 CONF_INITIAL_TORQUE_LIMIT = "initial_torque_limit"
+CONF_GRAVITY_RETURN_TO_ZERO = "gravity_return_to_zero"
 CONF_COMMISSION_STEP_MODE = "commission_step_mode"
 CONF_MULTI_TURN_MODE = "multi_turn_mode"
 
@@ -99,6 +100,7 @@ SERVO_SCHEMA = cv.Schema({
     cv.Optional(CONF_INITIAL_SPEED, default=90.0): cv.float_range(min=0, max=360),
     cv.Optional(CONF_INITIAL_ACCELERATION, default=20): cv.int_range(min=0, max=254),
     cv.Optional(CONF_INITIAL_TORQUE_LIMIT, default=30.0): cv.float_range(min=0, max=100),
+    cv.Optional(CONF_GRAVITY_RETURN_TO_ZERO, default=False): cv.boolean,
     cv.Optional(CONF_POSITION): sensor.sensor_schema(
         unit_of_measurement=UNIT_DEGREES, accuracy_decimals=1,
         state_class=STATE_CLASS_MEASUREMENT, icon="mdi:angle-acute"),
@@ -185,7 +187,7 @@ async def to_code(config):
         cg.add(var.add_servo(
             servo_id, servo_config[CONF_INVERTED], pref_key,
             servo_config[CONF_INITIAL_SPEED], servo_config[CONF_INITIAL_ACCELERATION],
-            servo_config[CONF_INITIAL_TORQUE_LIMIT]))
+            servo_config[CONF_INITIAL_TORQUE_LIMIT], servo_config[CONF_GRAVITY_RETURN_TO_ZERO]))
 
         for key, setter in (
             (CONF_POSITION, "set_position_sensor"), (CONF_POSITION_RAW, "set_position_raw_sensor"),
