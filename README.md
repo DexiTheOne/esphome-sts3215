@@ -152,10 +152,10 @@ component stops that command, clears its queued follow-up moves, and returns
 the cover to its measured position instead of showing an indefinite operation.
 While a move is active, feedback is polled every 25 ms so short unloaded moves
 can be observed even when the normal telemetry interval is slower.
-Set `uart_trace: true` under `sts3215:` to log every UART read request, write
+The current diagnostic release enables `uart_trace` by default to log every UART read request, write
 request, received byte stream, discarded late acknowledgement, and timeout
-as hexadecimal bytes. The demo enables this for bench diagnosis; disable it
-after testing to avoid the extra log traffic during motion.
+as hexadecimal bytes. Set `uart_trace: false` under `sts3215:` after testing
+to avoid the extra log traffic during motion.
 On the XIAO ESP32-S3, D0 is GPIO1 and is a suitable relay control pin while
 D6/GPIO43 and D7/GPIO44 serve the servo UART. The example uses D0 with
 `inverted: false` for an active-high relay. Use a relay input that accepts

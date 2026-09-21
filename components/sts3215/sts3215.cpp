@@ -89,15 +89,28 @@ void STS3215Component::initialize_powered_bus_() {
     const uint8_t torque[] = {static_cast<uint8_t>(servo.torque_limit_raw),
                               static_cast<uint8_t>(servo.torque_limit_raw >> 8)};
     const uint8_t disabled = 0;
+    // Disable torque first: a servo may restore volatile goal/limit registers
+    // when torque is switched off.
+    write_register_(servo.id, REG_TORQUE_ENABLE, &disabled, 1);
     write_register_(servo.id, REG_ACCELERATION, &acceleration, 1);
     write_register_(servo.id, REG_GOAL_SPEED, speed, 2);
     write_register_(servo.id, REG_TORQUE_LIMIT, torque, 2);
-    write_register_(servo.id, REG_TORQUE_ENABLE, &disabled, 1);
     if (servo.torque_sensor != nullptr) servo.torque_sensor->publish_state(false);
     uint8_t settings[10];
-    const bool settings_read = read_register_(servo.id, REG_TORQUE_ENABLE, settings, sizeof(settings));
-    const bool settings_ready = settings_read && settings[0] == 0 &&
-        decode_u16_(&settings[8]) == servo.torque_limit_raw;
+    bool settings_read = false;
+    bool settings_ready = false;
+    for (uint8_t attempt = 0; attempt < 3; attempt++) {
+      settings_read = read_register_(servo.id, REG_TORQUE_ENABLE, settings, sizeof(settings));
+      settings_ready = settings_read && settings[0] == 0 &&
+          decode_u16_(&settings[8]) == servo.torque_limit_raw;
+      if (settings_ready) break;
+      ESP_LOGW(TAG, "Servo %u power-up settings verification failed on attempt %u; restoring torque limit",
+               servo.id, attempt + 1);
+      if (attempt < 2) {
+        delay(10);
+        write_register_(servo.id, REG_TORQUE_LIMIT, torque, 2);
+      }
+    }
     // Goal speed and acceleration are written again in the seven-byte move
     // packet. The tested servo reported zero goal speed at idle after wake,
     // so this idle readback must not prevent that packet from being sent.
@@ -186,6 +199,7 @@ void STS3215Component::loop() {
 
 void STS3215Component::dump_config() {
   ESP_LOGCONFIG(TAG, "STS3215:");
+  ESP_LOGCONFIG(TAG, "  UART packet trace: %s", YESNO(uart_trace_));
   LOG_UPDATE_INTERVAL(this);
   ESP_LOGCONFIG(TAG, "  Inter-motor start delay: %u ms", static_cast<unsigned>(start_delay_ms_));
   ESP_LOGCONFIG(TAG, "  Move timeout: %u ms", static_cast<unsigned>(move_timeout_ms_));

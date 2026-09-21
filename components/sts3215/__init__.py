@@ -175,7 +175,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_POSITION_TOLERANCE, default=5): cv.int_range(min=1, max=1000),
         cv.Optional(CONF_POWER_PIN): pins.gpio_output_pin_schema,
         cv.Optional(CONF_POWER_ON_DELAY, default="1s"): cv.positive_time_period_milliseconds,
-        cv.Optional(CONF_UART_TRACE, default=False): cv.boolean,
+        cv.Optional(CONF_UART_TRACE, default=True): cv.boolean,
     }).extend(uart.UART_DEVICE_SCHEMA).extend(cv.polling_component_schema("500ms")),
     _unique_servo_ids,
 )
