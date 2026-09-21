@@ -1127,7 +1127,8 @@ void STS3215Component::publish_calibration_status_(STS3215Servo &servo) {
     status = "Active";
   else if (calibrated_(servo))
     status = "Ok";
-  servo.calibration_status_sensor->publish_state(status);
+  if (!servo.calibration_status_sensor->has_state() || servo.calibration_status_sensor->state != status)
+    servo.calibration_status_sensor->publish_state(status);
 }
 
 int32_t STS3215Component::raw_for_cover_position_(const STS3215Servo &servo, float position) const {
