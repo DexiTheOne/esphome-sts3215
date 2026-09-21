@@ -148,8 +148,10 @@ Cover commands are ignored until calibration is complete. The logical zero is
 not changed again after the points are saved, because doing so would shift all
 three endpoints. Calibration is independent for every servo and survives ESP32
 resets. The last completed position is also saved; on
-startup the component uses the still-stationary worm drive and the absolute
-single-turn angle to restore the servo's multi-turn coordinate frame.
+startup the component restores that logical position because the worm drive
+cannot back-drive while power is off. In Mode 3 the servo reports progress for
+the current relative move and returns its position counter to zero afterward,
+so the ESP32 maintains the accumulated blind position.
 
 Torque is enabled immediately before a queued move starts and disabled when
 the target is reached, motion stops, or `move_timeout` expires. The status

@@ -15,8 +15,6 @@ void STS3215Component::setup() {
   clear_rx_();
   for (auto &servo : servos_) {
     servo.preference = global_preferences->make_preference<STS3215PreferenceData>(servo.preference_key);
-    servo.calibration_preference = global_preferences->make_preference<STS3215CalibrationPreferenceData>(
-        servo.preference_key ^ 0x43414C42);
     load_preferences_(servo);
     update_commission_state_(servo, true);
     const uint8_t acceleration = servo.acceleration_raw;
@@ -234,13 +232,23 @@ void STS3215Component::poll_servo_(STS3215Servo &servo) {
     return;
   }
 
-  set_hardware_position_(servo, decode_signed_(decode_u16_(&feedback[0]), 15));
+  const int32_t hardware_position = decode_signed_(decode_u16_(&feedback[0]), 15);
+  set_hardware_position_(servo, hardware_position);
   const int16_t speed_raw = decode_signed_(decode_u16_(&feedback[2]), 15);
   const int16_t load_raw = decode_signed_(decode_u16_(&feedback[4]), 10);
   const int16_t current_raw = decode_signed_(decode_u16_(&feedback[13]), 15);
   servo.moving = feedback[10] != 0;
-  if (servo.command_active && servo.moving)
-    servo.moving_seen = true;
+  if (servo.command_active) {
+    if (servo.moving) {
+      servo.moving_seen = true;
+      // Mode 3 reports progress for the current relative move and returns to
+      // zero afterward. Convert that progress into the persistent logical
+      // blind coordinate maintained by the ESP32.
+      servo.position_raw = servo.move_start_raw + hardware_position;
+    } else if (servo.moving_seen) {
+      servo.position_raw = servo.target_raw;
+    }
+  }
 
   if (servo.position_sensor != nullptr)
     servo.position_sensor->publish_state(raw_to_degrees_(servo.position_raw, servo.inverted));
@@ -274,16 +282,17 @@ void STS3215Component::poll_servo_(STS3215Servo &servo) {
 
 void STS3215Component::begin_move_(STS3215Servo &servo, int32_t target_raw) {
   target_raw = std::max<int32_t>(-32767, std::min<int32_t>(32767, target_raw));
-  int32_t hardware_target = target_raw - servo.position_offset;
-  if (hardware_target < -32767 || hardware_target > 32767) {
-    hardware_target = std::max<int32_t>(-32767, std::min<int32_t>(32767, hardware_target));
-    target_raw = hardware_target + servo.position_offset;
-    ESP_LOGW(TAG, "Servo %u target was clamped to its current multi-turn hardware window", servo.id);
+  int32_t move_delta = target_raw - servo.position_raw;
+  if (move_delta < -32767 || move_delta > 32767) {
+    move_delta = std::max<int32_t>(-32767, std::min<int32_t>(32767, move_delta));
+    target_raw = servo.position_raw + move_delta;
+    ESP_LOGW(TAG, "Servo %u move was clamped to the Mode 3 single-command step range", servo.id);
   }
+  servo.move_start_raw = servo.position_raw;
   servo.target_raw = target_raw;
   const uint8_t enabled = 1;
   write_register_(servo.id, REG_TORQUE_ENABLE, &enabled, 1);
-  const uint16_t encoded = encode_signed_(hardware_target);
+  const uint16_t encoded = encode_signed_(move_delta);
   const uint8_t data[] = {
       servo.acceleration_raw, static_cast<uint8_t>(encoded), static_cast<uint8_t>(encoded >> 8),
       0, 0, static_cast<uint8_t>(servo.speed_limit_raw), static_cast<uint8_t>(servo.speed_limit_raw >> 8)};
@@ -295,7 +304,8 @@ void STS3215Component::begin_move_(STS3215Servo &servo, int32_t target_raw) {
   has_started_move_ = true;
   if (servo.torque_sensor != nullptr)
     servo.torque_sensor->publish_state(true);
-  ESP_LOGD(TAG, "Servo %u moving to raw position %ld", servo.id, static_cast<long>(target_raw));
+  ESP_LOGD(TAG, "Servo %u moving by raw delta %ld to logical position %ld", servo.id,
+           static_cast<long>(move_delta), static_cast<long>(target_raw));
 }
 
 void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
@@ -536,15 +546,8 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   if (action == 5) { commission_step_mode(servo_id); return; }
   if (action == 6) {
     stop_servo(servo_id);
-    uint8_t position[2];
-    if (!read_register_(servo_id, REG_PRESENT_POSITION, position, sizeof(position))) {
-      ESP_LOGW(TAG, "Cannot reset blind %u calibration: position read failed", servo_id);
-      return;
-    }
-    set_hardware_position_(*servo, decode_signed_(decode_u16_(position), 15));
-    servo->position_offset = -servo->hardware_position_raw;
-    servo->position_bias = servo->position_offset;
     servo->position_raw = 0;
+    servo->hardware_position_raw = 0;
     servo->target_raw = 0;
     servo->calibration_down = 0;
     servo->calibration_middle = 0;
@@ -570,11 +573,19 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     ESP_LOGW(TAG, "Cannot save calibration for servo %u: position read failed", servo_id);
     return;
   }
-  set_hardware_position_(*servo, decode_signed_(decode_u16_(&feedback[0]), 15));
+  servo->hardware_position_raw = decode_signed_(decode_u16_(&feedback[0]), 15);
   servo->moving = feedback[10] != 0;
   if (servo->moving) {
     ESP_LOGW(TAG, "Cannot save calibration for servo %u while it is still moving", servo_id);
     return;
+  }
+  if (servo->command_active) {
+    if (millis() - servo->command_started < 250) {
+      ESP_LOGW(TAG, "Cannot save calibration for servo %u until the current move completes", servo_id);
+      return;
+    }
+    servo->position_raw = servo->target_raw;
+    finish_move_(*servo, false);
   }
   if (action == 2) { servo->calibration_down = servo->position_raw; servo->calibration_mask |= 0x01; }
   if (action == 3) { servo->calibration_middle = servo->position_raw; servo->calibration_mask |= 0x02; }
@@ -660,10 +671,6 @@ void STS3215Component::load_preferences_(STS3215Servo &servo) {
     servo.acceleration_raw = servo.default_acceleration;
     servo.jog_increment = 10.0f;
   }
-  STS3215CalibrationPreferenceData calibration_data{};
-  if (servo.calibration_preference.load(&calibration_data) &&
-      calibration_data.version == CALIBRATION_PREFERENCE_VERSION)
-    servo.position_bias = calibration_data.position_bias;
   servo.speed_limit_raw = speed_to_raw_(servo.speed_limit_display);
   servo.torque_limit_raw = static_cast<uint16_t>(servo.torque_limit_display * 10.0f);
 }
@@ -678,9 +685,7 @@ void STS3215Component::save_preferences_(STS3215Servo &servo) {
       servo.calibration_down, servo.calibration_middle, servo.calibration_up,
       servo.saved_position, servo.acceleration_raw, servo.calibration_mask,
       static_cast<uint8_t>(servo.saved_position_valid), static_cast<uint8_t>(servo.calibration_unlocked)};
-  const STS3215CalibrationPreferenceData calibration_data = {
-      CALIBRATION_PREFERENCE_VERSION, servo.position_bias};
-  if (!servo.preference.save(&data) || !servo.calibration_preference.save(&calibration_data))
+  if (!servo.preference.save(&data))
     ESP_LOGW(TAG, "Failed to save preferences for servo %u", servo.id);
   else
     global_preferences->sync();
@@ -689,20 +694,12 @@ void STS3215Component::save_preferences_(STS3215Servo &servo) {
 void STS3215Component::set_hardware_position_(STS3215Servo &servo, int32_t hardware_position) {
   servo.hardware_position_raw = hardware_position;
   if (!servo.has_position) {
-    // The servo's multi-turn counter can reset at power loss. The worm drive
-    // cannot back-drive while off, so the last stopped position defines the
-    // correct turn-number offset for this boot.
-    if (servo.saved_position_valid) {
-      const int32_t base_position = hardware_position + servo.position_bias;
-      servo.position_offset = servo.position_bias +
-          static_cast<int32_t>(std::lround(static_cast<float>(servo.saved_position - base_position) /
-                                           STEPS_PER_REVOLUTION)) * static_cast<int32_t>(STEPS_PER_REVOLUTION);
-    } else {
-      servo.position_offset = servo.position_bias;
-    }
+    // Mode 3 position feedback is relative to the active move and returns to
+    // zero when it finishes. The worm drive cannot back-drive while powered
+    // off, so the last saved logical position is authoritative after reboot.
+    servo.position_raw = servo.saved_position_valid ? servo.saved_position : 0;
     servo.has_position = true;
   }
-  servo.position_raw = hardware_position + servo.position_offset;
 }
 
 void STS3215Component::publish_settings_(STS3215Servo &servo) {

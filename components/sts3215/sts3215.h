@@ -119,11 +119,6 @@ struct STS3215PreferenceData {
   uint8_t reserved;
 };
 
-struct STS3215CalibrationPreferenceData {
-  uint32_t version;
-  int32_t position_bias;
-};
-
 struct STS3215Servo {
   uint8_t id;
   bool inverted;
@@ -134,11 +129,10 @@ struct STS3215Servo {
   bool has_position{false};
   int32_t position_raw{0};
   int32_t hardware_position_raw{0};
-  int32_t position_offset{0};
-  int32_t position_bias{0};
   int32_t saved_position{0};
   bool saved_position_valid{false};
   int32_t target_raw{0};
+  int32_t move_start_raw{0};
   uint16_t speed_limit_raw{0};
   uint8_t acceleration_raw{0};
   uint16_t torque_limit_raw{0};
@@ -155,7 +149,6 @@ struct STS3215Servo {
   bool command_active{false};
   uint32_t command_started{0};
   ESPPreferenceObject preference;
-  ESPPreferenceObject calibration_preference;
 
   sensor::Sensor *position_sensor{nullptr};
   sensor::Sensor *position_raw_sensor{nullptr};
@@ -240,7 +233,6 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   static constexpr uint8_t REG_PRESENT_POSITION = 56;
   static constexpr float STEPS_PER_REVOLUTION = 4096.0f;
   static constexpr uint32_t PREFERENCE_VERSION = 2;
-  static constexpr uint32_t CALIBRATION_PREFERENCE_VERSION = 1;
 
   STS3215Servo *find_servo_(uint8_t servo_id);
   bool read_register_(uint8_t, uint8_t, uint8_t *, uint8_t);
