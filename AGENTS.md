@@ -23,6 +23,10 @@ positive/negative 10-degree moves.
 - The poller reads settings registers 40-49 and telemetry registers 56-70 in
   contiguous transactions for each servo.
 - Relative movement is exposed as the `sts3215.step` automation action.
+- Optional `power_pin` controls the shared motor supply; the XIAO demo uses
+  active-high D0/GPIO1 and waits `power_on_delay: 1s` before UART access.
+- On each power-up, the component verifies EEPROM Mode 3/Phase/limits and
+  restores volatile acceleration, speed, and torque-limit registers.
 
 ## Verified protocol findings
 
@@ -101,20 +105,99 @@ perspective. Always use the XIAO ESP32-S3's authoritative mapping above.
   use final validation to claim RX/TX and enforce bus settings.
 - This component validates 1 Mbps, RX+TX, 8 data bits, no parity, one stop bit.
 
+## Live device access with ESPHome CLI
+
+The current demo device is `sts3215-blind-demo` at `10.0.0.110`. Its native
+ESPHome API uses port 6053 without Noise encryption as of 2026-09-21. Confirm
+the address and API settings from current device logs before relying on them.
+The `esphome logs` command streams logs and can include entity states; it does not provide
+cover, button, or number commands. Use the `aioesphomeapi` package installed
+with ESPHome for those native API commands.
+
+On Windows PowerShell, install the CLI in a temporary virtual environment:
+
+```powershell
+python -m venv "$env:TEMP\sts3215-cli"
+& "$env:TEMP\sts3215-cli\Scripts\python.exe" -m pip install esphome
+& "$env:TEMP\sts3215-cli\Scripts\esphome.exe" version
+```
+
+The repository's demo YAML references local Wi-Fi secrets. For log access,
+create a temporary connection-only YAML; its placeholder Wi-Fi values are
+never uploaded to the device:
+
+```powershell
+@'
+esphome:
+  name: sts3215-blind-demo
+esp32:
+  board: seeed_xiao_esp32s3
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+wifi:
+  ssid: diagnostics-only
+  password: diagnostics-only
+api:
+'@ | Set-Content -LiteralPath "$env:TEMP\sts3215-logs.yaml" -Encoding utf8
+
+& "$env:TEMP\sts3215-cli\Scripts\esphome.exe" logs "$env:TEMP\sts3215-logs.yaml" --device 10.0.0.110 --no-states
+```
+
+Replace `--no-states` with `--states` to see entity updates. Stop the stream
+with Ctrl+C. To inspect native API entities or send a control command, use the
+same virtual environment's Python. This example lists the entities and stops
+the individual cover; stopping does not command a new position:
+
+```python
+import asyncio
+from aioesphomeapi import APIClient
+
+async def main():
+    client = APIClient("10.0.0.110", 6053, password=None, noise_psk=None)
+    await client.connect()
+    try:
+        entities, _ = await client.list_entities_services()
+        for entity in entities:
+            print(type(entity).__name__, entity.name, entity.key)
+        cover = next(e for e in entities if e.name == "Blind 1")
+        client.cover_command(cover.key, stop=True)
+        await asyncio.sleep(1)  # Allow the command to leave the API queue.
+    finally:
+        await client.disconnect()
+
+asyncio.run(main())
+```
+
+Save the Python example as `script.py` and run it with
+`& "$env:TEMP\sts3215-cli\Scripts\python.exe" script.py`.
+For an authorized position command, use
+`client.cover_command(cover.key, tilt=0.50)` (50% calibrated tilt).
+`client.number_command(entity.key, value)` changes a Number entity and
+`client.button_command(entity.key)` presses a Button entity. Look up keys by
+name each session rather than hardcoding them. A cover tilt command can move
+the blind through a gravity-return sequence; the multi-turn commissioning
+button can write servo EEPROM. Do not use the temporary diagnostic YAML with
+`esphome run` or `esphome upload`; deploy with the real device YAML and secrets.
+
+During the 2026-09-21 diagnosis, repeated wake attempts produced a valid
+zero-parameter write acknowledgement (status packet length 2) just before the
+settings read response. The old reader rejected the first packet and discarded
+the move. Commit `ca72a94` makes the reader consume and skip such acknowledgements
+until it receives the requested response. A full ESPHome 2026.9.0 build passed;
+the fix still needs verification on the actual device after firmware deployment.
+
 ## Scope and safety decisions
 
-- Normal position mode only for the first version. Continuous wheel/PWM/stepper
-  operating modes are not exposed yet.
-- No EEPROM writes are performed. Servo ID, baud, operating mode, and hardware
-  angle limits must be configured separately.
+- Mode 3 step-servo operation is required for the blind. Continuous wheel/PWM
+  modes are not exposed.
+- Normal startup, wake-up, and movement do not write EEPROM. The explicit
+  commissioning button can write Mode 3, Phase bit 4, and angle limits once.
 - `inverted` is a software coordinate transform, not an EEPROM direction write.
 - Reported load is a signed output-duty/load proxy, not calibrated mechanical
   torque. Avoid presenting it as N·m.
-- Command range is clamped to 0-360 degrees. Blind-specific safe endpoints need
-  commissioning and should be narrower than this generic range.
+- Blind-specific endpoints must be calibrated before cover movement.
 - Writes are fire-and-observe: the next settings/telemetry poll confirms state.
-  This tolerates servos configured for different status-return levels while the
-  next transaction discards any stale acknowledgement.
+  Reads skip delayed write acknowledgements from status-return level 2 servos.
 
 ## Remaining physical validation
 
