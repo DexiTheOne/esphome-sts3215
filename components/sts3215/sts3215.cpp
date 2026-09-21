@@ -146,6 +146,14 @@ void STS3215Component::loop() {
     calibration_action(action.first, action.second);
   }
   process_commissioning_();
+  // A short unloaded move can finish between normal update() calls. Poll
+  // active moves frequently so the moving flag and relative encoder progress
+  // are observed before the servo resets its Mode 3 counter to zero.
+  for (auto &active_servo : servos_) {
+    if (active_servo.command_active &&
+        static_cast<uint32_t>(millis() - active_servo.last_motion_poll) >= 25)
+      poll_servo_(active_servo);
+  }
   if (move_queue_.empty()) return;
 
   const uint32_t now = millis();
@@ -376,6 +384,7 @@ bool STS3215Component::write_register_(uint8_t servo_id, uint8_t address,
 }
 
 void STS3215Component::poll_servo_(STS3215Servo &servo) {
+  servo.last_motion_poll = millis();
   uint8_t settings[10];
   if (read_register_(servo.id, REG_TORQUE_ENABLE, settings, sizeof(settings))) {
     if (servo.torque_sensor != nullptr)
@@ -398,7 +407,7 @@ void STS3215Component::poll_servo_(STS3215Servo &servo) {
   const int16_t current_raw = decode_signed_(decode_u16_(&feedback[13]), 15);
   servo.moving = feedback[10] != 0;
   if (servo.command_active) {
-    if (servo.moving) {
+    if (servo.moving || hardware_position != 0) {
       servo.moving_seen = true;
       // Mode 3 reports progress for the current relative move and returns to
       // zero afterward. Convert that progress into the persistent logical
@@ -463,6 +472,7 @@ void STS3215Component::begin_move_(STS3215Servo &servo, int32_t target_raw) {
   servo.command_active = true;
   servo.moving_seen = false;
   servo.command_started = millis();
+  servo.last_motion_poll = servo.command_started;
   last_move_started_ = servo.command_started;
   last_move_servo_id_ = servo.id;
   has_started_move_ = true;

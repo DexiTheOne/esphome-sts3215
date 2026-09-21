@@ -166,6 +166,7 @@ struct STS3215Servo {
   bool moving_seen{false};
   bool command_active{false};
   uint32_t command_started{0};
+  uint32_t last_motion_poll{0};
   ESPPreferenceObject preference;
 
   sensor::Sensor *position_sensor{nullptr};

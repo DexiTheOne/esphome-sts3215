@@ -150,6 +150,8 @@ speed readback does not block movement.
 If feedback shows no movement within five seconds of a motion command, the
 component stops that command, clears its queued follow-up moves, and returns
 the cover to its measured position instead of showing an indefinite operation.
+While a move is active, feedback is polled every 25 ms so short unloaded moves
+can be observed even when the normal telemetry interval is slower.
 On the XIAO ESP32-S3, D0 is GPIO1 and is a suitable relay control pin while
 D6/GPIO43 and D7/GPIO44 serve the servo UART. The example uses D0 with
 `inverted: false` for an active-high relay. Use a relay input that accepts
