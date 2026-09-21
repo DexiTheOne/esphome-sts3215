@@ -217,3 +217,7 @@ Preserve the no-EEPROM-write default and multi-servo behavior. Run ESPHome YAML
 validation/compilation against the current stable release after changes. Bench
 tests should include bad checksum, absent servo, duplicate ID validation,
 inverted motion, endpoint clamping, and more than one servo on the bus.
+
+Before stopping repository work, commit completed local changes and push local
+commits to GitHub. If a push cannot be completed, report the reason and the
+unpushed commits.
