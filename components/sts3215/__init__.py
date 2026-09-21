@@ -3,6 +3,7 @@ import zlib
 from esphome import automation
 import esphome.codegen as cg
 from esphome.components import binary_sensor, button, cover, number, sensor, text_sensor, uart
+from esphome import pins
 import esphome.config_validation as cv
 from esphome.const import (
     CONF_ID, CONF_INVERTED, DEVICE_CLASS_CURRENT, DEVICE_CLASS_TEMPERATURE,
@@ -55,6 +56,8 @@ CONF_COMMISSION_STEP_MODE = "commission_step_mode"
 CONF_MULTI_TURN_MODE = "multi_turn_mode"
 CONF_PRESETS = "presets"
 CONF_TILT_POSITION = "tilt_position"
+CONF_POWER_PIN = "power_pin"
+CONF_POWER_ON_DELAY = "power_on_delay"
 
 sts3215_ns = cg.esphome_ns.namespace("sts3215")
 STS3215Component = sts3215_ns.class_("STS3215Component", cg.PollingComponent, uart.UARTDevice)
@@ -169,6 +172,8 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_START_DELAY, default="2s"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_MOVE_TIMEOUT, default="2min"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_POSITION_TOLERANCE, default=5): cv.int_range(min=1, max=1000),
+        cv.Optional(CONF_POWER_PIN): pins.gpio_output_pin_schema,
+        cv.Optional(CONF_POWER_ON_DELAY, default="1s"): cv.positive_time_period_milliseconds,
     }).extend(uart.UART_DEVICE_SCHEMA).extend(cv.polling_component_schema("500ms")),
     _unique_servo_ids,
 )
@@ -192,6 +197,10 @@ async def to_code(config):
     cg.add(var.set_start_delay(config[CONF_START_DELAY].total_milliseconds))
     cg.add(var.set_move_timeout(config[CONF_MOVE_TIMEOUT].total_milliseconds))
     cg.add(var.set_position_tolerance(config[CONF_POSITION_TOLERANCE]))
+    cg.add(var.set_power_on_delay(config[CONF_POWER_ON_DELAY].total_milliseconds))
+    if CONF_POWER_PIN in config:
+        pin = await cg.gpio_pin_expression(config[CONF_POWER_PIN])
+        cg.add(var.set_power_pin(pin))
 
     component_key = zlib.crc32(str(config[CONF_ID]).encode("utf-8")) & 0xFFFFFFFF
     for servo_config in config[CONF_SERVOS]:

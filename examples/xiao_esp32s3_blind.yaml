@@ -51,6 +51,12 @@ sts3215:
   start_delay: 2s
   move_timeout: 2min
   position_tolerance: 5
+  # XIAO D0 / GPIO1 drives an active-high relay for the shared motor supply.
+  # Use a relay module with a 3.3 V-compatible input; hold its input low at boot.
+  power_pin:
+    number: GPIO1
+    inverted: false
+  power_on_delay: 1s
   main_cover:
     name: All Blinds
   servos:

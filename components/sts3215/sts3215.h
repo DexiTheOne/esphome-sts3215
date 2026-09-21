@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <deque>
+#include <utility>
 #include <vector>
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
@@ -14,6 +15,7 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
 
 namespace esphome {
@@ -141,6 +143,7 @@ struct STS3215Servo {
   float default_torque;
   bool gravity_return_to_zero;
   bool has_position{false};
+  bool mode_ready{false};
   int32_t position_raw{0};
   int32_t hardware_position_raw{0};
   int32_t saved_position{0};
@@ -200,6 +203,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_start_delay(uint32_t value) { start_delay_ms_ = value; }
   void set_move_timeout(uint32_t value) { move_timeout_ms_ = value; }
   void set_position_tolerance(uint16_t value) { position_tolerance_ = value; }
+  void set_power_pin(GPIOPin *pin) { power_pin_ = pin; }
+  void set_power_on_delay(uint32_t value) { power_on_delay_ms_ = value; }
   void add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,
                  float initial_speed, uint8_t initial_acceleration, float initial_torque,
                  bool gravity_return_to_zero);
@@ -260,6 +265,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool read_status_packet_(uint8_t, uint8_t *, uint8_t);
   bool read_byte_timeout_(uint8_t *, uint32_t);
   void clear_rx_();
+  void set_bus_power_(bool on);
+  void initialize_powered_bus_();
+  void invalidate_telemetry_();
   void poll_servo_(STS3215Servo &servo);
   void begin_move_(STS3215Servo &servo, int32_t target_raw);
   void finish_move_(STS3215Servo &servo, bool timed_out);
@@ -296,6 +304,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
 
   std::vector<STS3215Servo> servos_;
   std::deque<STS3215QueuedMove> move_queue_;
+  std::deque<std::pair<uint8_t, uint8_t>> calibration_queue_;
   STS3215GroupCover *group_cover_{nullptr};
   uint32_t response_timeout_ms_{20};
   uint32_t start_delay_ms_{2000};
@@ -304,6 +313,11 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   uint32_t last_move_started_{0};
   uint8_t last_move_servo_id_{0};
   bool has_started_move_{false};
+  GPIOPin *power_pin_{nullptr};
+  uint32_t power_on_delay_ms_{1000};
+  uint32_t power_on_at_{0};
+  bool power_on_{false};
+  bool power_ready_{false};
 
   enum CommissionState : uint8_t {
     COMMISSION_IDLE,

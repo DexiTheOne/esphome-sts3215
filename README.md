@@ -12,6 +12,7 @@ library is pulled into the firmware.
 - Three-point (down/middle/up) calibration and one cover per servo
 - Optional aggregate cover with bus-wide staggered motor starts
 - Automatic torque enable while moving and torque disable at rest
+- Optional shared relay/MOSFET GPIO that removes motor power at rest
 - Position, speed, signed load/torque-output, voltage, temperature, current,
   and moving-state telemetry
 - Per-servo direction inversion for manual jog/position controls
@@ -66,6 +67,11 @@ sts3215:
   id: servo_bus
   uart_id: servo_uart
   update_interval: 1s
+  # Optional; omit for an always-powered bus.
+  power_pin:
+    number: GPIO1
+    inverted: false  # Set true for an active-low relay.
+  power_on_delay: 1s
   servos:
     - servo_id: 1
       inverted: false
@@ -124,6 +130,31 @@ volatile RAM registers after reboot. Number entities publish the selected UI
 precision (0.1 degree for position/jog and whole units for limits) instead of
 replacing it with register-conversion artifacts during every poll.
 
+### Optional motor power switch
+
+`power_pin` controls a relay or MOSFET for the shared motor supply. The pin is
+inactive at ESP32 startup, then briefly turns on to verify each servo's saved
+Mode 3 configuration and restore volatile speed, acceleration, and torque-limit
+settings. It turns off when all servos have torque disabled and no command or
+commissioning work is pending. A move or calibration request wakes the bus;
+the component waits `power_on_delay` (default `1s`) before speaking to it. The
+GPIO pin's `inverted` option selects active-low hardware. Without `power_pin`,
+the bus behaves as an always-powered installation.
+On the XIAO ESP32-S3, D0 is GPIO1 and is a suitable relay control pin while
+D6/GPIO43 and D7/GPIO44 serve the servo UART. The example uses D0 with
+`inverted: false` for an active-high relay. Use a relay input that accepts
+3.3 V logic and an external pull-down so its supply stays off while the ESP32
+pin is high impedance during reset.
+
+The numeric motor telemetry becomes unavailable while power is off, and the
+component skips polling and communication warnings in that state. The logical
+blind position and calibration remain in ESP32 memory. Mode 3 is stored in
+the servo EEPROM by the one-time commissioning action, so power switching does
+not change it. Each wake verifies the mode, Phase bit, and angle limits; an
+unconfigured or unresponsive motor cannot start a move. Normal startup and
+wake-up never write EEPROM. Speed and torque-limit changes made while the
+motor is off are saved and applied on its next wake.
+
 ### One-time multi-turn commissioning
 
 With the motor unloaded, press **Commission Multi-Turn Mode** once for each
@@ -171,6 +202,9 @@ startup the component restores that logical position because the worm drive
 cannot back-drive while power is off. In Mode 3 the servo reports progress for
 the current relative move and returns its position counter to zero afterward,
 so the ESP32 maintains the accumulated blind position.
+This assumes the worm gearbox holds the blind still while unpowered. A stalled
+or interrupted move, or manual movement with power off, can make the saved
+position inaccurate; reset calibration before relying on its endpoints again.
 
 Torque is enabled immediately before a queued move starts and disabled when
 the target is reached, motion stops, or `move_timeout` expires. The status

@@ -29,11 +29,59 @@ static float next_cover_quarter(float tilt, bool increase) {
 
 void STS3215Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up STS3215 bus with %u servo(s)...", static_cast<unsigned>(servos_.size()));
-  clear_rx_();
+  if (power_pin_ != nullptr) {
+    power_pin_->setup();
+    power_pin_->digital_write(false);
+  }
   for (auto &servo : servos_) {
     servo.preference = global_preferences->make_preference<STS3215PreferenceData>(servo.preference_key);
     load_preferences_(servo);
-    update_commission_state_(servo, true);
+    if (servo.saved_position_valid) {
+      servo.position_raw = servo.saved_position;
+      servo.has_position = true;
+    }
+    publish_settings_(servo);
+    publish_calibration_status_(servo);
+  }
+  if (power_pin_ != nullptr) {
+    set_bus_power_(true);  // Verify EEPROM and restore volatile settings after the motors boot.
+  } else {
+    initialize_powered_bus_();
+  }
+}
+
+void STS3215Component::set_bus_power_(bool on) {
+  if (power_pin_ == nullptr || power_on_ == on) return;
+  power_pin_->digital_write(on);
+  power_on_ = on;
+  power_ready_ = false;
+  if (on) {
+    power_on_at_ = millis();
+  } else {
+    invalidate_telemetry_();
+  }
+}
+
+void STS3215Component::invalidate_telemetry_() {
+  for (auto &servo : servos_) {
+    if (servo.position_sensor != nullptr) servo.position_sensor->publish_state(NAN);
+    if (servo.position_raw_sensor != nullptr) servo.position_raw_sensor->publish_state(NAN);
+    if (servo.speed_sensor != nullptr) servo.speed_sensor->publish_state(NAN);
+    if (servo.load_sensor != nullptr) servo.load_sensor->publish_state(NAN);
+    if (servo.voltage_sensor != nullptr) servo.voltage_sensor->publish_state(NAN);
+    if (servo.temperature_sensor != nullptr) servo.temperature_sensor->publish_state(NAN);
+    if (servo.status_sensor != nullptr) servo.status_sensor->publish_state(NAN);
+    if (servo.current_sensor != nullptr) servo.current_sensor->publish_state(NAN);
+    if (servo.moving_sensor != nullptr) servo.moving_sensor->invalidate_state();
+    if (servo.torque_sensor != nullptr) servo.torque_sensor->invalidate_state();
+    if (servo.multi_turn_sensor != nullptr) servo.multi_turn_sensor->invalidate_state();
+  }
+}
+
+void STS3215Component::initialize_powered_bus_() {
+  clear_rx_();
+  for (auto &servo : servos_) {
+    servo.mode_ready = update_commission_state_(servo, true);
     const uint8_t acceleration = servo.acceleration_raw;
     const uint8_t speed[] = {static_cast<uint8_t>(servo.speed_limit_raw),
                              static_cast<uint8_t>(servo.speed_limit_raw >> 8)};
@@ -44,12 +92,44 @@ void STS3215Component::setup() {
     write_register_(servo.id, REG_GOAL_SPEED, speed, 2);
     write_register_(servo.id, REG_TORQUE_LIMIT, torque, 2);
     write_register_(servo.id, REG_TORQUE_ENABLE, &disabled, 1);
-    publish_settings_(servo);
-    publish_calibration_status_(servo);
+    if (servo.torque_sensor != nullptr) servo.torque_sensor->publish_state(false);
+    uint8_t settings[10];
+    const bool settings_ready =
+        read_register_(servo.id, REG_TORQUE_ENABLE, settings, sizeof(settings)) &&
+        settings[0] == 0 && settings[1] == acceleration &&
+        decode_u16_(&settings[6]) == servo.speed_limit_raw &&
+        decode_u16_(&settings[8]) == servo.torque_limit_raw;
+    if (!settings_ready)
+      ESP_LOGW(TAG, "Servo %u did not confirm torque-off, acceleration, speed, and torque-limit settings", servo.id);
+    servo.mode_ready &= settings_ready;
+    uint8_t position[2];
+    if (read_register_(servo.id, REG_PRESENT_POSITION, position, sizeof(position)))
+      set_hardware_position_(servo, decode_signed_(decode_u16_(position), 15));
   }
+  power_ready_ = true;
 }
 
 void STS3215Component::loop() {
+  if (power_pin_ != nullptr) {
+    if (!power_on_ && (!move_queue_.empty() || !calibration_queue_.empty() ||
+                       commission_state_ != COMMISSION_IDLE))
+      set_bus_power_(true);
+    if (power_on_ && !power_ready_) {
+      if (static_cast<uint32_t>(millis() - power_on_at_) < power_on_delay_ms_) return;
+      initialize_powered_bus_();
+    }
+    if (power_on_ && move_queue_.empty() && calibration_queue_.empty() &&
+        commission_state_ == COMMISSION_IDLE) {
+      bool active = false;
+      for (const auto &servo : servos_) active |= servo.command_active;
+      if (!active) { set_bus_power_(false); return; }
+    }
+  }
+  if (!calibration_queue_.empty()) {
+    const auto action = calibration_queue_.front();
+    calibration_queue_.pop_front();
+    calibration_action(action.first, action.second);
+  }
   process_commissioning_();
   if (move_queue_.empty()) return;
 
@@ -65,6 +145,11 @@ void STS3215Component::loop() {
   // delay applies only when starting a different motor, which is what limits
   // the multi-blind startup surge.
   if (servo->command_active) return;
+  if (power_pin_ != nullptr && !servo->mode_ready) {
+    ESP_LOGW(TAG, "Servo %u is unavailable or not commissioned for mode 3; move discarded", servo->id);
+    move_queue_.pop_front();
+    return;
+  }
   const bool same_servo = has_started_move_ && last_move_servo_id_ == move.servo_id;
   if (has_started_move_ && !same_servo &&
       static_cast<uint32_t>(now - last_move_started_) < start_delay_ms_)
@@ -78,6 +163,10 @@ void STS3215Component::dump_config() {
   LOG_UPDATE_INTERVAL(this);
   ESP_LOGCONFIG(TAG, "  Inter-motor start delay: %u ms", static_cast<unsigned>(start_delay_ms_));
   ESP_LOGCONFIG(TAG, "  Move timeout: %u ms", static_cast<unsigned>(move_timeout_ms_));
+  if (power_pin_ != nullptr) {
+    LOG_PIN("  Motor power pin: ", power_pin_);
+    ESP_LOGCONFIG(TAG, "  Motor power-on delay: %u ms", static_cast<unsigned>(power_on_delay_ms_));
+  }
   for (const auto &servo : servos_)
     ESP_LOGCONFIG(TAG, "  Servo ID %u%s; calibration %s; gravity return %s", servo.id,
                   servo.inverted ? " (inverted)" : "", calibrated_(servo) ? "complete" : "incomplete",
@@ -85,6 +174,7 @@ void STS3215Component::dump_config() {
 }
 
 void STS3215Component::update() {
+  if (power_pin_ != nullptr && (!power_on_ || !power_ready_)) return;
   for (auto &servo : servos_)
     poll_servo_(servo);
   update_group_cover_();
@@ -404,12 +494,19 @@ bool STS3215Component::step(uint8_t servo_id, float degrees) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
   if (!servo->has_position) {
-    uint8_t data[2];
-    if (!read_register_(servo_id, REG_PRESENT_POSITION, data, sizeof(data))) {
-      ESP_LOGE(TAG, "Cannot jog servo %u before its position is known", servo_id);
-      return false;
+    if (power_pin_ != nullptr && !power_ready_) {
+      // A new Mode 3 coordinate starts at zero; a previously saved coordinate
+      // was restored in setup. Defer all bus communication until power is ready.
+      servo->position_raw = 0;
+      servo->has_position = true;
+    } else {
+      uint8_t data[2];
+      if (!read_register_(servo_id, REG_PRESENT_POSITION, data, sizeof(data))) {
+        ESP_LOGE(TAG, "Cannot jog servo %u before its position is known", servo_id);
+        return false;
+      }
+      set_hardware_position_(*servo, decode_signed_(decode_u16_(data), 15));
     }
-    set_hardware_position_(*servo, decode_signed_(decode_u16_(data), 15));
   }
   const int32_t delta = degrees_to_raw_(degrees, servo->inverted);
   int32_t planned_target;
@@ -425,7 +522,8 @@ bool STS3215Component::set_speed_limit(uint8_t servo_id, float value) {
   servo->speed_limit_raw = speed_to_raw_(servo->speed_limit_display);
   const uint8_t data[] = {static_cast<uint8_t>(servo->speed_limit_raw),
                           static_cast<uint8_t>(servo->speed_limit_raw >> 8)};
-  write_register_(servo_id, REG_GOAL_SPEED, data, 2);
+  if (power_pin_ == nullptr || (power_on_ && power_ready_))
+    write_register_(servo_id, REG_GOAL_SPEED, data, 2);
   save_preferences_(*servo);
   return true;
 }
@@ -434,7 +532,8 @@ bool STS3215Component::set_acceleration(uint8_t servo_id, float value) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
   servo->acceleration_raw = static_cast<uint8_t>(std::max(0.0f, std::min(254.0f, std::round(value))));
-  write_register_(servo_id, REG_ACCELERATION, &servo->acceleration_raw, 1);
+  if (power_pin_ == nullptr || (power_on_ && power_ready_))
+    write_register_(servo_id, REG_ACCELERATION, &servo->acceleration_raw, 1);
   save_preferences_(*servo);
   return true;
 }
@@ -446,7 +545,8 @@ bool STS3215Component::set_torque_limit(uint8_t servo_id, float value) {
   servo->torque_limit_raw = static_cast<uint16_t>(servo->torque_limit_display * 10.0f);
   const uint8_t data[] = {static_cast<uint8_t>(servo->torque_limit_raw),
                           static_cast<uint8_t>(servo->torque_limit_raw >> 8)};
-  write_register_(servo_id, REG_TORQUE_LIMIT, data, 2);
+  if (power_pin_ == nullptr || (power_on_ && power_ready_))
+    write_register_(servo_id, REG_TORQUE_LIMIT, data, 2);
   save_preferences_(*servo);
   return true;
 }
@@ -576,6 +676,7 @@ bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_re
   // minimum=0, maximum=2, Phase=9, and Operating_Mode=24.
   uint8_t config[25];
   if (!read_register_(servo.id, REG_MIN_ANGLE_LIMIT, config, sizeof(config))) {
+    servo.mode_ready = false;
     if (servo.multi_turn_sensor != nullptr)
       servo.multi_turn_sensor->publish_state(false);
     if (log_result)
@@ -587,6 +688,7 @@ bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_re
   const uint8_t phase = config[9];
   const uint8_t mode = config[24];
   const bool ready = mode == 3 && (phase & 0x10) != 0 && minimum == 0 && maximum == 0;
+  servo.mode_ready = ready;
   if (servo.multi_turn_sensor != nullptr)
     servo.multi_turn_sensor->publish_state(ready);
   if (log_result) {
@@ -605,6 +707,10 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
   if (action == 5) { commission_step_mode(servo_id); return; }
+  if (power_pin_ != nullptr && !power_ready_) {
+    calibration_queue_.emplace_back(servo_id, action);
+    return;
+  }
   if (action == 6) {
     stop_servo(servo_id);
     servo->position_raw = 0;
