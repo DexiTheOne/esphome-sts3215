@@ -25,9 +25,8 @@ wifi:
   password: !secret wifi_password
 
 external_components:
-  - source: github://DexiTheOne/esphome-sts3215@main
+  - source: ../components
     components: [sts3215]
-    refresh: 0s
 
 # XIAO ESP32-S3: D6/TX = GPIO43 and D7/RX = GPIO44.
 # With the XIAO plugged into Seeed's bus-servo driver, the board routes these
@@ -66,16 +65,13 @@ sts3215:
       inverted: false
       initial_speed: 90
       initial_acceleration: 20
+      max_acceleration: 50
       initial_torque_limit: 30
       # Every decreasing tilt transition first travels through 0% so gravity
       # settles the blind leaves consistently. Increasing transitions are direct.
       gravity_return_to_zero: true
       cover:
         name: Blind 1
-      # Press once during commissioning. It verifies mode, Phase bit 4, and the
-      # multi-turn limits; once all pass, later presses perform no EEPROM write.
-      commission_step_mode:
-        name: Blind 1 Commission Multi-Turn Mode
       position:
         name: Blind 1 Encoder Position
       position_raw:
@@ -100,10 +96,13 @@ sts3215:
         name: Blind 1 Multi-Turn Mode Active
       speed_limit:
         name: Blind 1 Speed Limit
+        mode: slider
       acceleration:
         name: Blind 1 Acceleration
+        mode: slider
       torque_limit:
         name: Blind 1 Torque Limit
+        mode: slider
       calibration:
         reset_blinds:
           name: Blind 1 Reset Calibration

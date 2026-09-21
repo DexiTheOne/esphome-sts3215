@@ -121,6 +121,11 @@ validated in the range 0-253. The bus must be configured as 1,000,000 baud,
 - Current uses the documented STS scale of 6.5 mA/count.
 - Acceleration is the raw 0-254 servo setting; one count represents the
   STS-series acceleration increment documented by Feetech.
+- `max_acceleration` sets the upper end of each servo's acceleration number
+  control (default 254). The XIAO demo uses 50 because its tested STS3215-12V
+  repeatedly read back 50 after requests of 51, 60, 100, and 170. The cause
+  of that limit is not yet confirmed. Use a higher value only after verifying
+  it on the particular servo.
 - `inverted: true` reverses user-facing position, speed, load, and relative-step
   direction without writing the servo's EEPROM. Cover direction itself is
   inferred from the saved down/middle/up encoder positions.

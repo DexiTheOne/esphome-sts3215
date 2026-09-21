@@ -142,8 +142,10 @@ struct STS3215Servo {
   uint8_t default_acceleration;
   float default_torque;
   bool gravity_return_to_zero;
+  uint8_t max_acceleration;
   bool has_position{false};
   bool mode_ready{false};
+  bool commission_attempted{false};
   int32_t position_raw{0};
   int32_t hardware_position_raw{0};
   int32_t saved_position{0};
@@ -209,7 +211,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_uart_trace(bool value) { uart_trace_ = value; }
   void add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,
                  float initial_speed, uint8_t initial_acceleration, float initial_torque,
-                 bool gravity_return_to_zero);
+                 bool gravity_return_to_zero, uint8_t max_acceleration);
   void set_position_sensor(uint8_t, sensor::Sensor *);
   void set_position_raw_sensor(uint8_t, sensor::Sensor *);
   void set_speed_sensor(uint8_t, sensor::Sensor *);
@@ -285,7 +287,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void update_cover_(STS3215Servo &servo);
   void update_group_cover_();
   void process_commissioning_();
-  bool update_commission_state_(STS3215Servo &servo, bool log_result);
+  bool update_commission_state_(STS3215Servo &servo, bool log_result, bool *read_success = nullptr);
   void set_hardware_position_(STS3215Servo &servo, int32_t hardware_position);
   bool calibrated_(const STS3215Servo &servo) const {
     if (servo.calibration_mask != 0x07) return false;
@@ -338,6 +340,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   uint8_t commissioning_servo_id_{0};
   uint8_t commissioning_phase_{0};
   uint32_t commission_next_ms_{0};
+  std::deque<uint8_t> pending_commission_ids_;
 };
 
 template<typename... Ts> class STS3215StepAction : public Action<Ts...>, public Parented<STS3215Component> {

@@ -50,9 +50,9 @@ CONF_RESET_BLINDS = "reset_blinds"
 CONF_CALIBRATION_STATUS = "status"
 CONF_INITIAL_SPEED = "initial_speed"
 CONF_INITIAL_ACCELERATION = "initial_acceleration"
+CONF_MAX_ACCELERATION = "max_acceleration"
 CONF_INITIAL_TORQUE_LIMIT = "initial_torque_limit"
 CONF_GRAVITY_RETURN_TO_ZERO = "gravity_return_to_zero"
-CONF_COMMISSION_STEP_MODE = "commission_step_mode"
 CONF_MULTI_TURN_MODE = "multi_turn_mode"
 CONF_PRESETS = "presets"
 CONF_TILT_POSITION = "tilt_position"
@@ -81,6 +81,8 @@ def _unique_servo_ids(config):
         if servo_id in seen:
             raise cv.Invalid(f"Duplicate STS3215 servo_id {servo_id}")
         seen.add(servo_id)
+        if servo_config[CONF_INITIAL_ACCELERATION] > servo_config[CONF_MAX_ACCELERATION]:
+            raise cv.Invalid(f"Servo {servo_id} initial_acceleration exceeds max_acceleration")
     return config
 
 
@@ -115,6 +117,7 @@ SERVO_SCHEMA = cv.Schema({
     cv.Optional(CONF_INVERTED, default=False): cv.boolean,
     cv.Optional(CONF_INITIAL_SPEED, default=90.0): cv.float_range(min=0, max=360),
     cv.Optional(CONF_INITIAL_ACCELERATION, default=20): cv.int_range(min=0, max=254),
+    cv.Optional(CONF_MAX_ACCELERATION, default=254): cv.int_range(min=0, max=254),
     cv.Optional(CONF_INITIAL_TORQUE_LIMIT, default=30.0): cv.float_range(min=0, max=100),
     cv.Optional(CONF_GRAVITY_RETURN_TO_ZERO, default=False): cv.boolean,
     cv.Optional(CONF_POSITION): sensor.sensor_schema(
@@ -158,9 +161,6 @@ SERVO_SCHEMA = cv.Schema({
         STS3215TorqueLimitNumber, unit_of_measurement=UNIT_PERCENT,
         entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:arm-flex"),
     cv.Optional(CONF_COVER): cover.cover_schema(STS3215Cover, device_class="blind"),
-    cv.Optional(CONF_COMMISSION_STEP_MODE): button.button_schema(
-        STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG,
-        icon="mdi:memory-arrow-down"),
     cv.Optional(CONF_CALIBRATION): CALIBRATION_SCHEMA,
     cv.Optional(CONF_PRESETS): cv.ensure_list(PRESET_SCHEMA),
 })
@@ -212,7 +212,8 @@ async def to_code(config):
         cg.add(var.add_servo(
             servo_id, servo_config[CONF_INVERTED], pref_key,
             servo_config[CONF_INITIAL_SPEED], servo_config[CONF_INITIAL_ACCELERATION],
-            servo_config[CONF_INITIAL_TORQUE_LIMIT], servo_config[CONF_GRAVITY_RETURN_TO_ZERO]))
+            servo_config[CONF_INITIAL_TORQUE_LIMIT], servo_config[CONF_GRAVITY_RETURN_TO_ZERO],
+            servo_config[CONF_MAX_ACCELERATION]))
 
         for key, setter in (
             (CONF_POSITION, "set_position_sensor"), (CONF_POSITION_RAW, "set_position_raw_sensor"),
@@ -239,7 +240,8 @@ async def to_code(config):
             speed = await _new_number(servo_config[CONF_SPEED_LIMIT], var, servo_id, 0.0, 360.0, 1.0)
             cg.add(var.set_speed_limit_number(servo_id, speed))
         if CONF_ACCELERATION in servo_config:
-            accel = await _new_number(servo_config[CONF_ACCELERATION], var, servo_id, 0.0, 254.0, 1.0)
+            accel = await _new_number(servo_config[CONF_ACCELERATION], var, servo_id,
+                                      0.0, float(servo_config[CONF_MAX_ACCELERATION]), 1.0)
             cg.add(var.set_acceleration_number(servo_id, accel))
         if CONF_TORQUE_LIMIT in servo_config:
             torque = await _new_number(servo_config[CONF_TORQUE_LIMIT], var, servo_id, 0.0, 100.0, 1.0)
@@ -250,12 +252,6 @@ async def to_code(config):
             cg.add(cov.set_parent(var))
             cg.add(cov.set_servo_id(servo_id))
             cg.add(var.set_cover(servo_id, cov))
-
-        if CONF_COMMISSION_STEP_MODE in servo_config:
-            btn = await button.new_button(servo_config[CONF_COMMISSION_STEP_MODE])
-            cg.add(btn.set_parent(var))
-            cg.add(btn.set_servo_id(servo_id))
-            cg.add(btn.set_action(5))
 
         if calibration := servo_config.get(CONF_CALIBRATION):
             if CONF_CALIBRATION_STATUS in calibration:

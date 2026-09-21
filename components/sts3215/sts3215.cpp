@@ -82,7 +82,12 @@ void STS3215Component::invalidate_telemetry_() {
 void STS3215Component::initialize_powered_bus_() {
   clear_rx_();
   for (auto &servo : servos_) {
-    servo.mode_ready = update_commission_state_(servo, true);
+    bool config_read = false;
+    servo.mode_ready = update_commission_state_(servo, true, &config_read);
+    if (config_read && !servo.mode_ready && !servo.commission_attempted) {
+      servo.commission_attempted = true;
+      pending_commission_ids_.push_back(servo.id);
+    }
     const uint8_t acceleration = servo.acceleration_raw;
     const uint8_t speed[] = {static_cast<uint8_t>(servo.speed_limit_raw),
                              static_cast<uint8_t>(servo.speed_limit_raw >> 8)};
@@ -159,6 +164,11 @@ void STS3215Component::loop() {
     calibration_queue_.pop_front();
     calibration_action(action.first, action.second);
   }
+  if (commission_state_ == COMMISSION_IDLE && !pending_commission_ids_.empty()) {
+    const uint8_t servo_id = pending_commission_ids_.front();
+    pending_commission_ids_.pop_front();
+    commission_step_mode(servo_id);
+  }
   process_commissioning_();
   // A short unloaded move can finish between normal update() calls. Poll
   // active moves frequently so the moving flag and relative encoder progress
@@ -169,6 +179,7 @@ void STS3215Component::loop() {
       poll_servo_(active_servo);
   }
   if (move_queue_.empty()) return;
+  if (commission_state_ != COMMISSION_IDLE || !pending_commission_ids_.empty()) return;
 
   const uint32_t now = millis();
   const auto move = move_queue_.front();
@@ -222,6 +233,10 @@ void STS3215Component::dump_config() {
 }
 
 void STS3215Component::update() {
+  // Reannounce the flash-backed state independently of motor power and UART.
+  // This also restores the API state if the startup publication was missed.
+  for (auto &servo : servos_)
+    publish_calibration_status_(servo);
   if (power_pin_ != nullptr && (!power_on_ || !power_ready_)) return;
   for (auto &servo : servos_)
     poll_servo_(servo);
@@ -230,9 +245,9 @@ void STS3215Component::update() {
 
 void STS3215Component::add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,
                                  float initial_speed, uint8_t initial_acceleration, float initial_torque,
-                                 bool gravity_return_to_zero) {
+                                 bool gravity_return_to_zero, uint8_t max_acceleration) {
   servos_.push_back({servo_id, inverted, preference_key, initial_speed, initial_acceleration,
-                     initial_torque, gravity_return_to_zero});
+                     initial_torque, gravity_return_to_zero, max_acceleration});
 }
 
 STS3215Servo *STS3215Component::find_servo_(uint8_t servo_id) {
@@ -655,7 +670,8 @@ bool STS3215Component::set_speed_limit(uint8_t servo_id, float value) {
 bool STS3215Component::set_acceleration(uint8_t servo_id, float value) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
-  servo->acceleration_raw = static_cast<uint8_t>(std::max(0.0f, std::min(254.0f, std::round(value))));
+  servo->acceleration_raw = static_cast<uint8_t>(
+      std::max(0.0f, std::min(static_cast<float>(servo->max_acceleration), std::round(value))));
   if (power_pin_ == nullptr || (power_on_ && power_ready_)) {
     write_register_(servo_id, REG_ACCELERATION, &servo->acceleration_raw, 1);
     uint8_t accepted;
@@ -717,12 +733,15 @@ void STS3215Component::process_commissioning_() {
     return;
   }
 
-  // This is deliberately reachable only from an explicit user button. Never
-  // perform EEPROM writes automatically during setup or polling.
+  // A successful configuration read must confirm a mismatch before EEPROM writes.
   switch (commission_state_) {
     case COMMISSION_CHECK:
-      if (update_commission_state_(*servo, true)) {
+      bool config_read;
+      if (update_commission_state_(*servo, true, &config_read)) {
         ESP_LOGW(TAG, "Servo %u is already fully commissioned; EEPROM was not written", servo->id);
+        commission_state_ = COMMISSION_IDLE;
+      } else if (!config_read) {
+        ESP_LOGE(TAG, "Servo %u commissioning cancelled because configuration could not be read", servo->id);
         commission_state_ = COMMISSION_IDLE;
       } else {
         commission_state_ = COMMISSION_PREPARE;
@@ -804,10 +823,11 @@ void STS3215Component::process_commissioning_() {
   }
 }
 
-bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_result) {
+bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_result, bool *read_success) {
   // Read EEPROM registers 9..33 in one transaction. Relevant offsets are:
   // minimum=0, maximum=2, Phase=9, and Operating_Mode=24.
   uint8_t config[25];
+  if (read_success != nullptr) *read_success = false;
   if (!read_register_(servo.id, REG_MIN_ANGLE_LIMIT, config, sizeof(config))) {
     servo.mode_ready = false;
     if (servo.multi_turn_sensor != nullptr)
@@ -816,6 +836,7 @@ bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_re
       ESP_LOGE(TAG, "Servo %u multi-turn configuration read failed", servo.id);
     return false;
   }
+  if (read_success != nullptr) *read_success = true;
   const uint16_t minimum = decode_u16_(&config[0]);
   const uint16_t maximum = decode_u16_(&config[2]);
   const uint8_t phase = config[9];
@@ -839,7 +860,6 @@ bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_re
 void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
-  if (action == 5) { commission_step_mode(servo_id); return; }
   if (power_pin_ != nullptr && !power_ready_) {
     calibration_queue_.emplace_back(servo_id, action);
     return;
@@ -1046,6 +1066,7 @@ void STS3215Component::load_preferences_(STS3215Servo &servo) {
     servo.acceleration_raw = servo.default_acceleration;
     servo.jog_increment = 10.0f;
   }
+  servo.acceleration_raw = std::min(servo.acceleration_raw, servo.max_acceleration);
   servo.speed_limit_raw = speed_to_raw_(servo.speed_limit_display);
   servo.torque_limit_raw = static_cast<uint16_t>(servo.torque_limit_display * 10.0f);
   if (legacy) save_preferences_(servo);
