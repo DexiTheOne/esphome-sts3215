@@ -208,6 +208,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_position_tolerance(uint16_t value) { position_tolerance_ = value; }
   void set_power_pin(GPIOPin *pin) { power_pin_ = pin; }
   void set_power_on_delay(uint32_t value) { power_on_delay_ms_ = value; }
+  void set_power_off_delay(uint32_t value) { power_off_delay_ms_ = value; }
   void set_uart_trace(bool value) { uart_trace_ = value; }
   void add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,
                  float initial_speed, uint8_t initial_acceleration, float initial_torque,
@@ -320,7 +321,10 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool has_started_move_{false};
   GPIOPin *power_pin_{nullptr};
   uint32_t power_on_delay_ms_{1000};
+  uint32_t power_off_delay_ms_{5000};
   uint32_t power_on_at_{0};
+  uint32_t idle_since_{0};
+  bool idle_timer_active_{false};
   bool power_on_{false};
   bool power_ready_{false};
   bool uart_trace_{false};

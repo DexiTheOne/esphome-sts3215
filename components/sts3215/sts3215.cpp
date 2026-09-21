@@ -58,7 +58,9 @@ void STS3215Component::set_bus_power_(bool on) {
   power_ready_ = false;
   if (on) {
     power_on_at_ = millis();
+    idle_timer_active_ = false;
   } else {
+    idle_timer_active_ = false;
     invalidate_telemetry_();
   }
 }
@@ -152,11 +154,20 @@ void STS3215Component::loop() {
       if (static_cast<uint32_t>(millis() - power_on_at_) < power_on_delay_ms_) return;
       initialize_powered_bus_();
     }
-    if (power_on_ && move_queue_.empty() && calibration_queue_.empty() &&
-        commission_state_ == COMMISSION_IDLE) {
-      bool active = false;
-      for (const auto &servo : servos_) active |= servo.command_active;
-      if (!active) { set_bus_power_(false); return; }
+    bool active = false;
+    for (const auto &servo : servos_) active |= servo.command_active;
+    const bool idle = move_queue_.empty() && calibration_queue_.empty() && pending_commission_ids_.empty() &&
+                      commission_state_ == COMMISSION_IDLE && !active;
+    if (power_on_ && idle) {
+      if (!idle_timer_active_) {
+        idle_since_ = millis();
+        idle_timer_active_ = true;
+      } else if (static_cast<uint32_t>(millis() - idle_since_) >= power_off_delay_ms_) {
+        set_bus_power_(false);
+        return;
+      }
+    } else {
+      idle_timer_active_ = false;
     }
   }
   if (!calibration_queue_.empty()) {
@@ -225,6 +236,7 @@ void STS3215Component::dump_config() {
   if (power_pin_ != nullptr) {
     LOG_PIN("  Motor power pin: ", power_pin_);
     ESP_LOGCONFIG(TAG, "  Motor power-on delay: %u ms", static_cast<unsigned>(power_on_delay_ms_));
+    ESP_LOGCONFIG(TAG, "  Motor power-off delay: %u ms", static_cast<unsigned>(power_off_delay_ms_));
   }
   for (const auto &servo : servos_)
     ESP_LOGCONFIG(TAG, "  Servo ID %u%s; calibration %s; gravity return %s", servo.id,

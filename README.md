@@ -140,8 +140,10 @@ replacing it with register-conversion artifacts during every poll.
 `power_pin` controls a relay or MOSFET for the shared motor supply. The pin is
 inactive at ESP32 startup, then briefly turns on to verify each servo's saved
 Mode 3 configuration and restore volatile speed, acceleration, and torque-limit
-settings. It turns off when all servos have torque disabled and no command or
-commissioning work is pending. A move or calibration request wakes the bus;
+settings. Once all servos have torque disabled and no command or commissioning
+work is pending, it keeps the bus powered for `power_off_delay` (default `5s`)
+so telemetry remains available and another move can start without a power cycle.
+A new request resets this idle timer. A move or calibration request wakes the bus;
 the component waits `power_on_delay` (default `1s`) before speaking to it. The
 GPIO pin's `inverted` option selects active-low hardware. Without `power_pin`,
 the bus behaves as an always-powered installation.

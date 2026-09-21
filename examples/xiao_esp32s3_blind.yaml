@@ -58,6 +58,7 @@ sts3215:
     number: GPIO1
     inverted: false
   power_on_delay: 1s
+  power_off_delay: 5s
   main_cover:
     name: All Blinds
   servos:
