@@ -26,6 +26,7 @@ wifi:
 
 external_components:
   - source: github://DexiTheOne/esphome-sts3215@main
+    refresh: always
     components: [sts3215]
 
 # XIAO ESP32-S3: D6/TX = GPIO43 and D7/RX = GPIO44.
