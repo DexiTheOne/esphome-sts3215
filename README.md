@@ -156,6 +156,9 @@ The current diagnostic release enables `uart_trace` by default to log every UART
 request, received byte stream, discarded late acknowledgement, and timeout
 as hexadecimal bytes. Set `uart_trace: false` under `sts3215:` after testing
 to avoid the extra log traffic during motion.
+The queue skips targets already at the current encoder position without
+sending a zero-distance motor command. Debug logs also show cover targets,
+remaining queued moves, and explicit stop requests.
 On the XIAO ESP32-S3, D0 is GPIO1 and is a suitable relay control pin while
 D6/GPIO43 and D7/GPIO44 serve the servo UART. The example uses D0 with
 `inverted: false` for an active-high relay. Use a relay input that accepts

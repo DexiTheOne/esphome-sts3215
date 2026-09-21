@@ -189,6 +189,14 @@ void STS3215Component::loop() {
     update_group_cover_();
     return;
   }
+  if (move.target_raw == servo->position_raw) {
+    move_queue_.pop_front();
+    ESP_LOGD(TAG, "Servo %u skipped zero-distance move; %u queued move(s) remain",
+             servo->id, static_cast<unsigned>(move_queue_.size()));
+    update_cover_(*servo);
+    update_group_cover_();
+    return;
+  }
   const bool same_servo = has_started_move_ && last_move_servo_id_ == move.servo_id;
   if (has_started_move_ && !same_servo &&
       static_cast<uint32_t>(now - last_move_started_) < start_delay_ms_)
@@ -550,6 +558,9 @@ void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
   write_register_(servo.id, REG_TORQUE_ENABLE, &disabled, 1);
   servo.command_active = false;
   servo.moving_seen = false;
+  ESP_LOGD(TAG, "Servo %u move finished at raw %ld (target %ld); %u queued move(s) remain",
+           servo.id, static_cast<long>(servo.position_raw), static_cast<long>(servo.target_raw),
+           static_cast<unsigned>(move_queue_.size()));
   if (servo.torque_sensor != nullptr)
     servo.torque_sensor->publish_state(false);
   if (timed_out)
@@ -933,6 +944,9 @@ void STS3215Component::command_cover(uint8_t servo_id, float position) {
   pending_target_(*servo, previous_target);
   const float previous_tilt = cover_position_for_raw_(*servo, previous_target);
   const int32_t target_raw = raw_for_cover_position_(*servo, position);
+  ESP_LOGD(TAG, "Servo %u cover command %.0f%%: current raw %ld, target raw %ld, previous tilt %.0f%%",
+           servo_id, position * 100.0f, static_cast<long>(servo->position_raw),
+           static_cast<long>(target_raw), previous_tilt * 100.0f);
   if (servo->gravity_return_to_zero && position > 0.001f &&
       position < previous_tilt - 0.001f) {
     enqueue_cover_sequence_(servo_id, raw_for_cover_position_(*servo, 0.0f), target_raw);
@@ -990,6 +1004,8 @@ void STS3215Component::step_all_covers(bool increase) {
 void STS3215Component::stop_servo(uint8_t servo_id) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
+  ESP_LOGW(TAG, "Servo %u stop requested; active=%s, %u queued move(s)", servo_id,
+           YESNO(servo->command_active), static_cast<unsigned>(move_queue_.size()));
   remove_queued_(servo_id);
   if (servo->command_active)
     finish_move_(*servo, false);
