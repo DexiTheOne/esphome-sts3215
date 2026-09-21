@@ -140,6 +140,16 @@ commissioning work is pending. A move or calibration request wakes the bus;
 the component waits `power_on_delay` (default `1s`) before speaking to it. The
 GPIO pin's `inverted` option selects active-low hardware. Without `power_pin`,
 the bus behaves as an always-powered installation.
+
+UART reads allow 50 ms per attempt and retry twice after a missed or malformed
+response. On wake, the component verifies that torque is off and the requested
+torque limit was accepted before allowing movement. It also reads back the
+accepted acceleration, since a servo may cap a requested value, and saves that
+value for later moves. Goal speed is written in each move command; a zero idle
+speed readback does not block movement.
+If feedback shows no movement within five seconds of a motion command, the
+component stops that command, clears its queued follow-up moves, and returns
+the cover to its measured position instead of showing an indefinite operation.
 On the XIAO ESP32-S3, D0 is GPIO1 and is a suitable relay control pin while
 D6/GPIO43 and D7/GPIO44 serve the servo UART. The example uses D0 with
 `inverted: false` for an active-high relay. Use a relay input that accepts

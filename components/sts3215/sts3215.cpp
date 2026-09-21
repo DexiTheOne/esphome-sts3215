@@ -95,9 +95,11 @@ void STS3215Component::initialize_powered_bus_() {
     if (servo.torque_sensor != nullptr) servo.torque_sensor->publish_state(false);
     uint8_t settings[10];
     const bool settings_read = read_register_(servo.id, REG_TORQUE_ENABLE, settings, sizeof(settings));
-    const bool settings_ready = settings_read && settings[0] == 0 && settings[1] == acceleration &&
-        decode_u16_(&settings[6]) == servo.speed_limit_raw &&
+    const bool settings_ready = settings_read && settings[0] == 0 &&
         decode_u16_(&settings[8]) == servo.torque_limit_raw;
+    // Goal speed and acceleration are written again in the seven-byte move
+    // packet. The tested servo reported zero goal speed at idle after wake,
+    // so this idle readback must not prevent that packet from being sent.
     if (!settings_read)
       ESP_LOGW(TAG, "Servo %u settings readback timed out after power-up", servo.id);
     else if (!settings_ready)
@@ -106,6 +108,14 @@ void STS3215Component::initialize_powered_bus_() {
                static_cast<unsigned>(settings[1]), static_cast<unsigned>(acceleration),
                static_cast<unsigned>(decode_u16_(&settings[6])), static_cast<unsigned>(servo.speed_limit_raw),
                static_cast<unsigned>(decode_u16_(&settings[8])), static_cast<unsigned>(servo.torque_limit_raw));
+    if (settings_read && settings[1] != acceleration) {
+      ESP_LOGW(TAG, "Servo %u accepted acceleration %u instead of %u; using accepted value",
+               servo.id, settings[1], acceleration);
+      servo.acceleration_raw = settings[1];
+      if (servo.acceleration_number != nullptr)
+        servo.acceleration_number->publish_state(servo.acceleration_raw);
+      save_preferences_(servo);
+    }
     servo.mode_ready &= settings_ready;
     uint8_t position[2];
     if (read_register_(servo.id, REG_PRESENT_POSITION, position, sizeof(position)))
@@ -330,13 +340,21 @@ bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, u
 }
 
 bool STS3215Component::read_register_(uint8_t servo_id, uint8_t address, uint8_t *data, uint8_t length) {
-  clear_rx_();
   const uint8_t packet_length = 4;
   const uint8_t checksum = static_cast<uint8_t>(~(servo_id + packet_length + INST_READ + address + length));
   const uint8_t packet[] = {0xFF, 0xFF, servo_id, packet_length, INST_READ, address, length, checksum};
-  write_array(packet, sizeof(packet));
-  flush();
-  return read_status_packet_(servo_id, data, length);
+  for (uint8_t attempt = 0; attempt < 3; attempt++) {
+    clear_rx_();
+    write_array(packet, sizeof(packet));
+    flush();
+    if (read_status_packet_(servo_id, data, length)) {
+      if (attempt != 0)
+        ESP_LOGD(TAG, "Servo %u register %u read succeeded on attempt %u", servo_id, address, attempt + 1);
+      return true;
+    }
+    delay(10);
+  }
+  return false;
 }
 
 bool STS3215Component::write_register_(uint8_t servo_id, uint8_t address,
@@ -414,7 +432,11 @@ void STS3215Component::poll_servo_(STS3215Servo &servo) {
     const uint32_t elapsed = millis() - servo.command_started;
     const bool arrived = std::abs(servo.position_raw - servo.target_raw) <= position_tolerance_;
     const bool stopped_after_motion = servo.moving_seen && !servo.moving;
-    if ((elapsed >= 250 && arrived) || stopped_after_motion || elapsed >= move_timeout_ms_)
+    if (elapsed >= 5000 && !servo.moving_seen && !arrived) {
+      ESP_LOGW(TAG, "Servo %u did not begin moving within 5 s; clearing queued moves", servo.id);
+      remove_queued_(servo.id);
+      finish_move_(servo, false);
+    } else if ((elapsed >= 250 && arrived) || stopped_after_motion || elapsed >= move_timeout_ms_)
       finish_move_(servo, elapsed >= move_timeout_ms_ && !arrived);
   }
   update_cover_(servo);
@@ -550,8 +572,17 @@ bool STS3215Component::set_acceleration(uint8_t servo_id, float value) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
   servo->acceleration_raw = static_cast<uint8_t>(std::max(0.0f, std::min(254.0f, std::round(value))));
-  if (power_pin_ == nullptr || (power_on_ && power_ready_))
+  if (power_pin_ == nullptr || (power_on_ && power_ready_)) {
     write_register_(servo_id, REG_ACCELERATION, &servo->acceleration_raw, 1);
+    uint8_t accepted;
+    if (read_register_(servo_id, REG_ACCELERATION, &accepted, 1) && accepted != servo->acceleration_raw) {
+      ESP_LOGW(TAG, "Servo %u accepted acceleration %u instead of %u; using accepted value",
+               servo_id, accepted, servo->acceleration_raw);
+      servo->acceleration_raw = accepted;
+    }
+  }
+  if (servo->acceleration_number != nullptr)
+    servo->acceleration_number->publish_state(servo->acceleration_raw);
   save_preferences_(*servo);
   return true;
 }
@@ -1103,7 +1134,7 @@ void STS3215SpeedNumber::control(float value) {
 
 void STS3215AccelerationNumber::control(float value) {
   const float clean = std::round(value);
-  if (parent_ != nullptr && parent_->set_acceleration(servo_id_, clean)) publish_state(clean);
+  if (parent_ != nullptr) parent_->set_acceleration(servo_id_, clean);
 }
 
 void STS3215TorqueLimitNumber::control(float value) {

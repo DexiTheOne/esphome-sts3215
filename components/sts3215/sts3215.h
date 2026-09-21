@@ -306,7 +306,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   std::deque<STS3215QueuedMove> move_queue_;
   std::deque<std::pair<uint8_t, uint8_t>> calibration_queue_;
   STS3215GroupCover *group_cover_{nullptr};
-  uint32_t response_timeout_ms_{20};
+  uint32_t response_timeout_ms_{50};
   uint32_t start_delay_ms_{2000};
   uint32_t move_timeout_ms_{120000};
   uint16_t position_tolerance_{5};
