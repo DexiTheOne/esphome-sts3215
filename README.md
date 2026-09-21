@@ -140,8 +140,10 @@ after that is a read-only no-op, which avoids repeated EEPROM wear.
    Fully Up**. The three points can be recorded in any order.
 
 The middle encoder value must be strictly between the endpoint values, in
-either direction. Once all three points are valid, the cover maps 0% to down,
-50% to the calibrated middle, and 100% to up. This piecewise mapping preserves
+either direction. Once all three points are valid, Home Assistant exposes a
+tilt control: 0% is closed in the down direction, 50% is the calibrated fully
+open position, and 100% is closed in the up direction. Calculated openness is
+0% at either endpoint and 100% at the middle. This piecewise mapping preserves
 an intentionally off-center middle point. Completing calibration locks the
 three point buttons; press **Reset Calibration** to deliberately start over.
 Cover commands are ignored until calibration is complete. The logical zero is
@@ -163,8 +165,10 @@ entities expose encoder position, moving state, and actual torque-enable state.
 optional `main_cover`. Therefore group commands and several individual commands
 received at nearly the same time cannot start all motors together. The main
 cover queues calibrated servos in their `servos:` list order and reports their
-average position. Copy a servo list item and give it a unique ID to scale from
-one motor to six or more.
+average tilt and openness. The delay applies when starting different motors;
+successive commands for one motor begin as soon as its active move completes.
+Copy a servo list item and give it a unique ID to scale from one motor to six or
+more.
 
 ## Relative movement
 
@@ -181,7 +185,8 @@ button:
 
 Mode 3 uses zero minimum and maximum angle limits so relative jogging can cross
 zero in either direction. The calibrated cover never commands beyond its saved
-down/up endpoints.
+down/up endpoints. Repeated jog presses accumulate into one buffered target, so
+quick button presses are not discarded and cannot interrupt the active move.
 
 ## Repository use later
 

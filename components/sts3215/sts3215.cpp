@@ -10,6 +10,11 @@ namespace sts3215 {
 
 static const char *const TAG = "sts3215";
 
+static float tilt_openness(float tilt) {
+  tilt = std::max(0.0f, std::min(1.0f, tilt));
+  return 1.0f - std::abs(tilt * 2.0f - 1.0f);
+}
+
 void STS3215Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up STS3215 bus with %u servo(s)...", static_cast<unsigned>(servos_.size()));
   clear_rx_();
@@ -33,15 +38,26 @@ void STS3215Component::setup() {
 
 void STS3215Component::loop() {
   process_commissioning_();
+  if (move_queue_.empty()) return;
+
   const uint32_t now = millis();
-  if (!move_queue_.empty() &&
-      (!has_started_move_ || static_cast<uint32_t>(now - last_move_started_) >= start_delay_ms_)) {
-    const auto move = move_queue_.front();
+  const auto move = move_queue_.front();
+  auto *servo = find_servo_(move.servo_id);
+  if (servo == nullptr) {
     move_queue_.pop_front();
-    auto *servo = find_servo_(move.servo_id);
-    if (servo != nullptr)
-      begin_move_(*servo, move.target_raw);
+    return;
   }
+  // Never interrupt an in-flight relative command for the same servo. A
+  // buffered target starts as soon as that command completes. The configured
+  // delay applies only when starting a different motor, which is what limits
+  // the multi-blind startup surge.
+  if (servo->command_active) return;
+  const bool same_servo = has_started_move_ && last_move_servo_id_ == move.servo_id;
+  if (has_started_move_ && !same_servo &&
+      static_cast<uint32_t>(now - last_move_started_) < start_delay_ms_)
+    return;
+  move_queue_.pop_front();
+  begin_move_(*servo, move.target_raw);
 }
 
 void STS3215Component::dump_config() {
@@ -301,6 +317,7 @@ void STS3215Component::begin_move_(STS3215Servo &servo, int32_t target_raw) {
   servo.moving_seen = false;
   servo.command_started = millis();
   last_move_started_ = servo.command_started;
+  last_move_servo_id_ = servo.id;
   has_started_move_ = true;
   if (servo.torque_sensor != nullptr)
     servo.torque_sensor->publish_state(true);
@@ -323,8 +340,14 @@ void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
 }
 
 void STS3215Component::enqueue_move_(uint8_t servo_id, int32_t target_raw) {
-  remove_queued_(servo_id);
-  move_queue_.push_back({servo_id, std::max<int32_t>(-32767, std::min<int32_t>(32767, target_raw))});
+  target_raw = std::max<int32_t>(-32767, std::min<int32_t>(32767, target_raw));
+  const auto existing = std::find_if(move_queue_.begin(), move_queue_.end(),
+      [servo_id](const STS3215QueuedMove &move) { return move.servo_id == servo_id; });
+  if (existing != move_queue_.end()) {
+    existing->target_raw = target_raw;
+  } else {
+    move_queue_.push_back({servo_id, target_raw});
+  }
 }
 
 void STS3215Component::remove_queued_(uint8_t servo_id) {
@@ -351,7 +374,11 @@ bool STS3215Component::step(uint8_t servo_id, float degrees) {
     set_hardware_position_(*servo, decode_signed_(decode_u16_(data), 15));
   }
   const int32_t delta = degrees_to_raw_(degrees, servo->inverted);
-  enqueue_move_(servo_id, servo->position_raw + delta);
+  int32_t planned_target = servo->command_active ? servo->target_raw : servo->position_raw;
+  const auto queued = std::find_if(move_queue_.begin(), move_queue_.end(),
+      [servo_id](const STS3215QueuedMove &move) { return move.servo_id == servo_id; });
+  if (queued != move_queue_.end()) planned_target = queued->target_raw;
+  enqueue_move_(servo_id, planned_target + delta);
   return true;
 }
 
@@ -624,8 +651,9 @@ void STS3215Component::command_cover(uint8_t servo_id, float position) {
   enqueue_move_(servo_id, raw_for_cover_position_(*servo, position));
   if (servo->cover != nullptr) {
     const float current = cover_position_for_raw_(*servo, servo->position_raw);
-    servo->cover->update_from_parent(current,
-        position >= current ? cover::COVER_OPERATION_OPENING : cover::COVER_OPERATION_CLOSING);
+    const auto operation = tilt_openness(position) >= tilt_openness(current)
+        ? cover::COVER_OPERATION_OPENING : cover::COVER_OPERATION_CLOSING;
+    servo->cover->update_from_parent(current, tilt_openness(current), operation);
   }
 }
 
@@ -746,19 +774,24 @@ void STS3215Component::update_cover_(STS3215Servo &servo) {
   if (pending) {
     const float current = cover_position_for_raw_(servo, servo.position_raw);
     const float target = cover_position_for_raw_(servo, pending_target);
-    operation = target >= current ? cover::COVER_OPERATION_OPENING : cover::COVER_OPERATION_CLOSING;
+    operation = tilt_openness(target) >= tilt_openness(current)
+        ? cover::COVER_OPERATION_OPENING : cover::COVER_OPERATION_CLOSING;
   }
-  servo.cover->update_from_parent(cover_position_for_raw_(servo, servo.position_raw), operation);
+  const float tilt = cover_position_for_raw_(servo, servo.position_raw);
+  servo.cover->update_from_parent(tilt, tilt_openness(tilt), operation);
 }
 
 void STS3215Component::update_group_cover_() {
   if (group_cover_ == nullptr) return;
-  float sum = 0.0f;
+  float tilt_sum = 0.0f;
+  float openness_sum = 0.0f;
   size_t count = 0;
   bool opening = false, closing = false;
   for (const auto &servo : servos_) {
     if (!servo.has_position || !calibrated_(servo)) continue;
-    sum += cover_position_for_raw_(servo, servo.position_raw);
+    const float tilt = cover_position_for_raw_(servo, servo.position_raw);
+    tilt_sum += tilt;
+    openness_sum += tilt_openness(tilt);
     count++;
     int32_t target = servo.target_raw;
     bool pending = servo.command_active;
@@ -771,21 +804,22 @@ void STS3215Component::update_group_cover_() {
       }
     }
     if (pending) {
-      const float current_position = cover_position_for_raw_(servo, servo.position_raw);
-      const float target_position = cover_position_for_raw_(servo, target);
-      opening |= target_position >= current_position;
-      closing |= target_position < current_position;
+      const float current_tilt = cover_position_for_raw_(servo, servo.position_raw);
+      const float target_tilt = cover_position_for_raw_(servo, target);
+      opening |= tilt_openness(target_tilt) >= tilt_openness(current_tilt);
+      closing |= tilt_openness(target_tilt) < tilt_openness(current_tilt);
     }
   }
   if (count == 0) return;
   const auto operation = opening ? cover::COVER_OPERATION_OPENING :
                          closing ? cover::COVER_OPERATION_CLOSING : cover::COVER_OPERATION_IDLE;
-  group_cover_->update_from_parent(sum / count, operation);
+  group_cover_->update_from_parent(tilt_sum / count, openness_sum / count, operation);
 }
 
 cover::CoverTraits STS3215Cover::get_traits() {
   auto traits = cover::CoverTraits();
-  traits.set_supports_position(true);
+  traits.set_supports_position(false);
+  traits.set_supports_tilt(true);
   traits.set_supports_stop(true);
   traits.set_is_assumed_state(false);
   return traits;
@@ -793,18 +827,21 @@ cover::CoverTraits STS3215Cover::get_traits() {
 
 void STS3215Cover::control(const cover::CoverCall &call) {
   if (call.get_stop()) parent_->stop_servo(servo_id_);
-  if (call.get_position().has_value()) parent_->command_cover(servo_id_, *call.get_position());
+  if (call.get_tilt().has_value()) parent_->command_cover(servo_id_, *call.get_tilt());
 }
 
-void STS3215Cover::update_from_parent(float value, cover::CoverOperation operation) {
-  position = value;
+void STS3215Cover::update_from_parent(float tilt_value, float openness,
+                                      cover::CoverOperation operation) {
+  tilt = tilt_value;
+  position = openness;
   current_operation = operation;
   publish_state(false);
 }
 
 cover::CoverTraits STS3215GroupCover::get_traits() {
   auto traits = cover::CoverTraits();
-  traits.set_supports_position(true);
+  traits.set_supports_position(false);
+  traits.set_supports_tilt(true);
   traits.set_supports_stop(true);
   traits.set_is_assumed_state(false);
   return traits;
@@ -812,11 +849,13 @@ cover::CoverTraits STS3215GroupCover::get_traits() {
 
 void STS3215GroupCover::control(const cover::CoverCall &call) {
   if (call.get_stop()) parent_->stop_all();
-  if (call.get_position().has_value()) parent_->command_all_covers(*call.get_position());
+  if (call.get_tilt().has_value()) parent_->command_all_covers(*call.get_tilt());
 }
 
-void STS3215GroupCover::update_from_parent(float value, cover::CoverOperation operation) {
-  position = value;
+void STS3215GroupCover::update_from_parent(float tilt_value, float openness,
+                                           cover::CoverOperation operation) {
+  tilt = tilt_value;
+  position = openness;
   current_operation = operation;
   publish_state(false);
 }

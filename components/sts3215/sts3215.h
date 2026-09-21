@@ -75,7 +75,7 @@ class STS3215Cover : public cover::Cover {
   void set_parent(STS3215Component *parent) { parent_ = parent; }
   void set_servo_id(uint8_t value) { servo_id_ = value; }
   cover::CoverTraits get_traits() override;
-  void update_from_parent(float position, cover::CoverOperation operation);
+  void update_from_parent(float tilt, float openness, cover::CoverOperation operation);
  protected:
   void control(const cover::CoverCall &call) override;
   STS3215Component *parent_{nullptr};
@@ -86,7 +86,7 @@ class STS3215GroupCover : public cover::Cover {
  public:
   void set_parent(STS3215Component *parent) { parent_ = parent; }
   cover::CoverTraits get_traits() override;
-  void update_from_parent(float position, cover::CoverOperation operation);
+  void update_from_parent(float tilt, float openness, cover::CoverOperation operation);
  protected:
   void control(const cover::CoverCall &call) override;
   STS3215Component *parent_{nullptr};
@@ -279,6 +279,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   uint32_t move_timeout_ms_{120000};
   uint16_t position_tolerance_{5};
   uint32_t last_move_started_{0};
+  uint8_t last_move_servo_id_{0};
   bool has_started_move_{false};
 
   enum CommissionState : uint8_t {
