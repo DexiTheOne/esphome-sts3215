@@ -94,13 +94,18 @@ void STS3215Component::initialize_powered_bus_() {
     write_register_(servo.id, REG_TORQUE_ENABLE, &disabled, 1);
     if (servo.torque_sensor != nullptr) servo.torque_sensor->publish_state(false);
     uint8_t settings[10];
-    const bool settings_ready =
-        read_register_(servo.id, REG_TORQUE_ENABLE, settings, sizeof(settings)) &&
-        settings[0] == 0 && settings[1] == acceleration &&
+    const bool settings_read = read_register_(servo.id, REG_TORQUE_ENABLE, settings, sizeof(settings));
+    const bool settings_ready = settings_read && settings[0] == 0 && settings[1] == acceleration &&
         decode_u16_(&settings[6]) == servo.speed_limit_raw &&
         decode_u16_(&settings[8]) == servo.torque_limit_raw;
-    if (!settings_ready)
-      ESP_LOGW(TAG, "Servo %u did not confirm torque-off, acceleration, speed, and torque-limit settings", servo.id);
+    if (!settings_read)
+      ESP_LOGW(TAG, "Servo %u settings readback timed out after power-up", servo.id);
+    else if (!settings_ready)
+      ESP_LOGW(TAG, "Servo %u settings mismatch: torque=%u/%u accel=%u/%u speed=%u/%u limit=%u/%u",
+               servo.id, static_cast<unsigned>(settings[0]), static_cast<unsigned>(disabled),
+               static_cast<unsigned>(settings[1]), static_cast<unsigned>(acceleration),
+               static_cast<unsigned>(decode_u16_(&settings[6])), static_cast<unsigned>(servo.speed_limit_raw),
+               static_cast<unsigned>(decode_u16_(&settings[8])), static_cast<unsigned>(servo.torque_limit_raw));
     servo.mode_ready &= settings_ready;
     uint8_t position[2];
     if (read_register_(servo.id, REG_PRESENT_POSITION, position, sizeof(position)))
@@ -148,6 +153,8 @@ void STS3215Component::loop() {
   if (power_pin_ != nullptr && !servo->mode_ready) {
     ESP_LOGW(TAG, "Servo %u is unavailable or not commissioned for mode 3; move discarded", servo->id);
     move_queue_.pop_front();
+    update_cover_(*servo);
+    update_group_cover_();
     return;
   }
   const bool same_servo = has_started_move_ && last_move_servo_id_ == move.servo_id;
@@ -280,35 +287,46 @@ bool STS3215Component::read_byte_timeout_(uint8_t *data, uint32_t deadline) {
 bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, uint8_t expected_length) {
   const uint32_t deadline = millis() + response_timeout_ms_;
   uint8_t byte = 0, previous = 0;
-  bool header_found = false;
   while (read_byte_timeout_(&byte, deadline)) {
-    if (previous == 0xFF && byte == 0xFF) { header_found = true; break; }
-    previous = byte;
+    if (previous != 0xFF || byte != 0xFF) {
+      previous = byte;
+      continue;
+    }
+    previous = 0;
+    uint8_t id, packet_length, error;
+    if (!read_byte_timeout_(&id, deadline) || !read_byte_timeout_(&packet_length, deadline) ||
+        !read_byte_timeout_(&error, deadline))
+      return false;
+    if (packet_length < 2 || packet_length > 64) continue;
+
+    const bool expected = id == expected_id && packet_length == expected_length + 2;
+    uint8_t checksum_sum = id + packet_length + error;
+    // LENGTH counts the error byte, parameter bytes, and checksum. Consume
+    // complete packets so a late write acknowledgement cannot be mistaken for
+    // the read response that follows it.
+    for (uint8_t i = 0; i < packet_length - 2; i++) {
+      if (!read_byte_timeout_(&byte, deadline)) return false;
+      checksum_sum += byte;
+      if (expected) data[i] = byte;
+    }
+    uint8_t received_checksum;
+    if (!read_byte_timeout_(&received_checksum, deadline)) return false;
+    if (static_cast<uint8_t>(~checksum_sum) != received_checksum) {
+      ESP_LOGW(TAG, "Checksum error in response from servo %u", id);
+      continue;
+    }
+    if (!expected) {
+      // A valid zero-parameter packet is a write acknowledgement. It can
+      // arrive after clear_rx_() when the servo uses status-return level 2.
+      if (packet_length != 2)
+        ESP_LOGD(TAG, "Skipping status packet (ID %u, length %u)", id, packet_length);
+      continue;
+    }
+    if (error != 0)
+      ESP_LOGW(TAG, "Servo %u returned status flags 0x%02X", expected_id, error);
+    return true;
   }
-  if (!header_found)
-    return false;
-  uint8_t id, packet_length, error;
-  if (!read_byte_timeout_(&id, deadline) || !read_byte_timeout_(&packet_length, deadline) ||
-      !read_byte_timeout_(&error, deadline))
-    return false;
-  if (id != expected_id || packet_length != expected_length + 2) {
-    ESP_LOGW(TAG, "Unexpected status packet (ID %u, length %u)", id, packet_length);
-    return false;
-  }
-  uint8_t checksum_sum = id + packet_length + error;
-  for (uint8_t i = 0; i < expected_length; i++) {
-    if (!read_byte_timeout_(&data[i], deadline)) return false;
-    checksum_sum += data[i];
-  }
-  uint8_t received_checksum;
-  if (!read_byte_timeout_(&received_checksum, deadline)) return false;
-  if (static_cast<uint8_t>(~checksum_sum) != received_checksum) {
-    ESP_LOGW(TAG, "Checksum error in response from servo %u", expected_id);
-    return false;
-  }
-  if (error != 0)
-    ESP_LOGW(TAG, "Servo %u returned status flags 0x%02X", expected_id, error);
-  return true;
+  return false;
 }
 
 bool STS3215Component::read_register_(uint8_t servo_id, uint8_t address, uint8_t *data, uint8_t length) {
