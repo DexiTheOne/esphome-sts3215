@@ -24,6 +24,28 @@ web_server:
   version: 3
   local: true
   include_internal: true
+  sorting_groups:
+    - id: all_blinds_group
+      name: "All Blinds"
+      sorting_weight: 0
+    - id: blind_6_group
+      name: "Blind 6"
+      sorting_weight: 10
+    - id: blind_5_group
+      name: "Blind 5"
+      sorting_weight: 20
+    - id: blind_4_group
+      name: "Blind 4"
+      sorting_weight: 30
+    - id: blind_3_group
+      name: "Blind 3"
+      sorting_weight: 40
+    - id: blind_2_group
+      name: "Blind 2"
+      sorting_weight: 50
+    - id: blind_1_group
+      name: "Blind 1"
+      sorting_weight: 60
   ota: false
 
 ota:
@@ -74,6 +96,9 @@ sts3215:
   power_off_delay: 5s
   main_cover:
     name: All Blinds
+    web_server:
+      sorting_group_id: all_blinds_group
+      sorting_weight: 0
   servos:
 
     - servo_id: 6
@@ -87,82 +112,133 @@ sts3215:
       gravity_return_to_zero: true
       cover:
         name: Blind 6
+        web_server:
+          sorting_group_id: blind_6_group
+          sorting_weight: 0
       position:
         name: Blind 6 Encoder Position
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       position_raw:
         name: Blind 6 Encoder Position Raw
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       speed:
         name: Blind 6 Servo Speed
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       load:
         name: Blind 6 Servo Torque Output
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       temperature:
         name: Blind 6 Servo Temperature
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       voltage:
         name: Blind 6 Servo Voltage
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       current:
         name: Blind 6 Servo Current
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       status:
         name: Blind 6 Servo Status
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       moving:
         name: Blind 6 Servo Moving
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       torque_enabled:
         name: Blind 6 Torque Enabled
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       multi_turn_mode:
         name: Blind 6 Multi-Turn Mode Active
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
       speed_limit:
         name: Blind 6 Speed Limit
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
         mode: slider
       acceleration:
         name: Blind 6 Acceleration
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
         mode: slider
       torque_limit:
         name: Blind 6 Torque Limit
+        web_server:
+          sorting_group_id: blind_6_group
         internal: true
         mode: slider
       calibration:
         auto_torque_limit: 25%
         auto_calibrate:
           name: Blind 6 Auto Calibrate
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         negative_direction:
           name: Blind 6 Negative Direction
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         reset_blinds:
           name: Blind 6 Reset Calibration
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         status:
           name: Blind 6 Calibration Status
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         jog_increment:
           name: Blind 6 Jog Increment
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         jog_forward:
           name: Blind 6 Jog Forward
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         jog_reverse:
           name: Blind 6 Jog Reverse
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         set_down:
           name: Blind 6 Set Fully Down
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         set_middle:
           name: Blind 6 Set Middle
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
         set_up:
           name: Blind 6 Set Fully Up
+          web_server:
+            sorting_group_id: blind_6_group
           internal: true
 
     - servo_id: 5
@@ -176,82 +252,133 @@ sts3215:
       gravity_return_to_zero: true
       cover:
         name: Blind 5
+        web_server:
+          sorting_group_id: blind_5_group
+          sorting_weight: 0
       position:
         name: Blind 5 Encoder Position
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       position_raw:
         name: Blind 5 Encoder Position Raw
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       speed:
         name: Blind 5 Servo Speed
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       load:
         name: Blind 5 Servo Torque Output
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       temperature:
         name: Blind 5 Servo Temperature
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       voltage:
         name: Blind 5 Servo Voltage
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       current:
         name: Blind 5 Servo Current
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       status:
         name: Blind 5 Servo Status
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       moving:
         name: Blind 5 Servo Moving
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       torque_enabled:
         name: Blind 5 Torque Enabled
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       multi_turn_mode:
         name: Blind 5 Multi-Turn Mode Active
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
       speed_limit:
         name: Blind 5 Speed Limit
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
         mode: slider
       acceleration:
         name: Blind 5 Acceleration
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
         mode: slider
       torque_limit:
         name: Blind 5 Torque Limit
+        web_server:
+          sorting_group_id: blind_5_group
         internal: true
         mode: slider
       calibration:
         auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 5 Auto Calibrate
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         negative_direction:
           name: Blind 5 Negative Direction
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         reset_blinds:
           name: Blind 5 Reset Calibration
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         status:
           name: Blind 5 Calibration Status
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         jog_increment:
           name: Blind 5 Jog Increment
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         jog_forward:
           name: Blind 5 Jog Forward
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         jog_reverse:
           name: Blind 5 Jog Reverse
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         set_down:
           name: Blind 5 Set Fully Down
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         set_middle:
           name: Blind 5 Set Middle
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
         set_up:
           name: Blind 5 Set Fully Up
+          web_server:
+            sorting_group_id: blind_5_group
           internal: true
 
     - servo_id: 4
@@ -265,82 +392,133 @@ sts3215:
       gravity_return_to_zero: true
       cover:
         name: Blind 4
+        web_server:
+          sorting_group_id: blind_4_group
+          sorting_weight: 0
       position:
         name: Blind 4 Encoder Position
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       position_raw:
         name: Blind 4 Encoder Position Raw
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       speed:
         name: Blind 4 Servo Speed
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       load:
         name: Blind 4 Servo Torque Output
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       temperature:
         name: Blind 4 Servo Temperature
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       voltage:
         name: Blind 4 Servo Voltage
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       current:
         name: Blind 4 Servo Current
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       status:
         name: Blind 4 Servo Status
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       moving:
         name: Blind 4 Servo Moving
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       torque_enabled:
         name: Blind 4 Torque Enabled
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       multi_turn_mode:
         name: Blind 4 Multi-Turn Mode Active
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
       speed_limit:
         name: Blind 4 Speed Limit
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
         mode: slider
       acceleration:
         name: Blind 4 Acceleration
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
         mode: slider
       torque_limit:
         name: Blind 4 Torque Limit
+        web_server:
+          sorting_group_id: blind_4_group
         internal: true
         mode: slider
       calibration:
         auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 4 Auto Calibrate
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         negative_direction:
           name: Blind 4 Negative Direction
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         reset_blinds:
           name: Blind 4 Reset Calibration
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         status:
           name: Blind 4 Calibration Status
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         jog_increment:
           name: Blind 4 Jog Increment
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         jog_forward:
           name: Blind 4 Jog Forward
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         jog_reverse:
           name: Blind 4 Jog Reverse
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         set_down:
           name: Blind 4 Set Fully Down
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         set_middle:
           name: Blind 4 Set Middle
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
         set_up:
           name: Blind 4 Set Fully Up
+          web_server:
+            sorting_group_id: blind_4_group
           internal: true
 
     - servo_id: 3
@@ -354,82 +532,133 @@ sts3215:
       gravity_return_to_zero: true
       cover:
         name: Blind 3
+        web_server:
+          sorting_group_id: blind_3_group
+          sorting_weight: 0
       position:
         name: Blind 3 Encoder Position
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       position_raw:
         name: Blind 3 Encoder Position Raw
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       speed:
         name: Blind 3 Servo Speed
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       load:
         name: Blind 3 Servo Torque Output
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       temperature:
         name: Blind 3 Servo Temperature
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       voltage:
         name: Blind 3 Servo Voltage
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       current:
         name: Blind 3 Servo Current
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       status:
         name: Blind 3 Servo Status
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       moving:
         name: Blind 3 Servo Moving
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       torque_enabled:
         name: Blind 3 Torque Enabled
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       multi_turn_mode:
         name: Blind 3 Multi-Turn Mode Active
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
       speed_limit:
         name: Blind 3 Speed Limit
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
         mode: slider
       acceleration:
         name: Blind 3 Acceleration
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
         mode: slider
       torque_limit:
         name: Blind 3 Torque Limit
+        web_server:
+          sorting_group_id: blind_3_group
         internal: true
         mode: slider
       calibration:
         auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 3 Auto Calibrate
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         negative_direction:
           name: Blind 3 Negative Direction
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         reset_blinds:
           name: Blind 3 Reset Calibration
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         status:
           name: Blind 3 Calibration Status
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         jog_increment:
           name: Blind 3 Jog Increment
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         jog_forward:
           name: Blind 3 Jog Forward
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         jog_reverse:
           name: Blind 3 Jog Reverse
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         set_down:
           name: Blind 3 Set Fully Down
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         set_middle:
           name: Blind 3 Set Middle
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
         set_up:
           name: Blind 3 Set Fully Up
+          web_server:
+            sorting_group_id: blind_3_group
           internal: true
 
     - servo_id: 2
@@ -443,82 +672,133 @@ sts3215:
       gravity_return_to_zero: true
       cover:
         name: Blind 2
+        web_server:
+          sorting_group_id: blind_2_group
+          sorting_weight: 0
       position:
         name: Blind 2 Encoder Position
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       position_raw:
         name: Blind 2 Encoder Position Raw
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       speed:
         name: Blind 2 Servo Speed
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       load:
         name: Blind 2 Servo Torque Output
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       temperature:
         name: Blind 2 Servo Temperature
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       voltage:
         name: Blind 2 Servo Voltage
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       current:
         name: Blind 2 Servo Current
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       status:
         name: Blind 2 Servo Status
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       moving:
         name: Blind 2 Servo Moving
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       torque_enabled:
         name: Blind 2 Torque Enabled
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       multi_turn_mode:
         name: Blind 2 Multi-Turn Mode Active
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
       speed_limit:
         name: Blind 2 Speed Limit
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
         mode: slider
       acceleration:
         name: Blind 2 Acceleration
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
         mode: slider
       torque_limit:
         name: Blind 2 Torque Limit
+        web_server:
+          sorting_group_id: blind_2_group
         internal: true
         mode: slider
       calibration:
         auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 2 Auto Calibrate
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         negative_direction:
           name: Blind 2 Negative Direction
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         reset_blinds:
           name: Blind 2 Reset Calibration
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         status:
           name: Blind 2 Calibration Status
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         jog_increment:
           name: Blind 2 Jog Increment
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         jog_forward:
           name: Blind 2 Jog Forward
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         jog_reverse:
           name: Blind 2 Jog Reverse
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         set_down:
           name: Blind 2 Set Fully Down
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         set_middle:
           name: Blind 2 Set Middle
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
         set_up:
           name: Blind 2 Set Fully Up
+          web_server:
+            sorting_group_id: blind_2_group
           internal: true
 
     - servo_id: 1
@@ -532,80 +812,131 @@ sts3215:
       gravity_return_to_zero: true
       cover:
         name: Blind 1
+        web_server:
+          sorting_group_id: blind_1_group
+          sorting_weight: 0
       position:
         name: Blind 1 Encoder Position
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       position_raw:
         name: Blind 1 Encoder Position Raw
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       speed:
         name: Blind 1 Servo Speed
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       load:
         name: Blind 1 Servo Torque Output
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       temperature:
         name: Blind 1 Servo Temperature
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       voltage:
         name: Blind 1 Servo Voltage
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       current:
         name: Blind 1 Servo Current
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       status:
         name: Blind 1 Servo Status
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       moving:
         name: Blind 1 Servo Moving
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       torque_enabled:
         name: Blind 1 Torque Enabled
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       multi_turn_mode:
         name: Blind 1 Multi-Turn Mode Active
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
       speed_limit:
         name: Blind 1 Speed Limit
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
         mode: slider
       acceleration:
         name: Blind 1 Acceleration
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
         mode: slider
       torque_limit:
         name: Blind 1 Torque Limit
+        web_server:
+          sorting_group_id: blind_1_group
         internal: true
         mode: slider
       calibration:
         auto_torque_limit: 25%
         auto_calibrate:
           name: Blind 1 Auto Calibrate
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         negative_direction:
           name: Blind 1 Negative Direction
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         reset_blinds:
           name: Blind 1 Reset Calibration
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         status:
           name: Blind 1 Calibration Status
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         jog_increment:
           name: Blind 1 Jog Increment
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         jog_forward:
           name: Blind 1 Jog Forward
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         jog_reverse:
           name: Blind 1 Jog Reverse
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         set_down:
           name: Blind 1 Set Fully Down
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         set_middle:
           name: Blind 1 Set Middle
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
         set_up:
           name: Blind 1 Set Fully Up
+          web_server:
+            sorting_group_id: blind_1_group
           internal: true
