@@ -1,0 +1,454 @@
+# Six-blind XIAO ESP32-S3 example. Store Wi-Fi credentials in secrets.yaml.
+# Auto calibrate missing/reset blinds individually before using All Blinds.
+substitutions:
+  device_name: sts3215-six-blinds
+  friendly_name: STS3215 Six Blinds
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp32:
+  board: seeed_xiao_esp32s3
+  framework:
+    type: esp-idf
+
+logger:
+  # Native USB logging leaves the servo UART free.
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source: github://DexiTheOne/esphome-sts3215@main
+    refresh: always
+    components: [sts3215]
+
+# XIAO ESP32-S3: D6/TX = GPIO43 and D7/RX = GPIO44.
+# With the XIAO plugged into Seeed's bus-servo driver, the board routes these
+# through its half-duplex TTL interface. Set the driver's mode jumper to UART.
+uart:
+  id: servo_uart
+  tx_pin: GPIO43
+  rx_pin: GPIO44
+  baud_rate: 1000000
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+  rx_buffer_size: 256
+
+sts3215:
+  id: blind_servo_bus
+  uart_id: servo_uart
+  update_interval: 500ms
+  # Every individual and group-cover command uses this one bus-wide queue.
+  # Physical order: 6, 5, 4, 3, 2, 1. Ripple pairs: 6+1, then 5+2, then 4+3.
+  # Staggered waits for both complete sequences before starting the next pair.
+  movement_mode: staggered
+  movement_order: ripple
+  start_delay: 2s
+  move_timeout: 2min
+  position_tolerance: 5
+  # Disable packet-level tracing for normal operation.
+  uart_trace: false
+  # XIAO D0 / GPIO1 drives an active-high relay for the shared motor supply.
+  # Use a relay module with a 3.3 V-compatible input; hold its input low at boot.
+  power_pin:
+    number: GPIO1
+    inverted: false
+  power_on_delay: 1s
+  power_off_delay: 5s
+  main_cover:
+    name: All Blinds
+  servos:
+
+    - servo_id: 6
+      inverted: false
+      initial_speed: 90
+      initial_acceleration: 20
+      max_acceleration: 50
+      initial_torque_limit: 30
+      # Every decreasing tilt transition first travels through 0% so gravity
+      # settles the blind leaves consistently. Increasing transitions are direct.
+      gravity_return_to_zero: true
+      cover:
+        name: Blind 6
+      position:
+        name: Blind 6 Encoder Position
+      position_raw:
+        name: Blind 6 Encoder Position Raw
+      speed:
+        name: Blind 6 Servo Speed
+      load:
+        name: Blind 6 Servo Torque Output
+      temperature:
+        name: Blind 6 Servo Temperature
+      voltage:
+        name: Blind 6 Servo Voltage
+      current:
+        name: Blind 6 Servo Current
+      status:
+        name: Blind 6 Servo Status
+      moving:
+        name: Blind 6 Servo Moving
+      torque_enabled:
+        name: Blind 6 Torque Enabled
+      multi_turn_mode:
+        name: Blind 6 Multi-Turn Mode Active
+      speed_limit:
+        name: Blind 6 Speed Limit
+        mode: slider
+      acceleration:
+        name: Blind 6 Acceleration
+        mode: slider
+      torque_limit:
+        name: Blind 6 Torque Limit
+        mode: slider
+      calibration:
+        auto_calibrate:
+          name: Blind 6 Auto Calibrate
+        negative_direction:
+          name: Blind 6 Negative Direction
+        reset_blinds:
+          name: Blind 6 Reset Calibration
+        status:
+          name: Blind 6 Calibration Status
+        jog_increment:
+          name: Blind 6 Jog Increment
+        jog_forward:
+          name: Blind 6 Jog Forward
+        jog_reverse:
+          name: Blind 6 Jog Reverse
+        set_down:
+          name: Blind 6 Set Fully Down
+        set_middle:
+          name: Blind 6 Set Middle
+        set_up:
+          name: Blind 6 Set Fully Up
+
+    - servo_id: 5
+      inverted: false
+      initial_speed: 90
+      initial_acceleration: 20
+      max_acceleration: 50
+      initial_torque_limit: 30
+      # Every decreasing tilt transition first travels through 0% so gravity
+      # settles the blind leaves consistently. Increasing transitions are direct.
+      gravity_return_to_zero: true
+      cover:
+        name: Blind 5
+      position:
+        name: Blind 5 Encoder Position
+      position_raw:
+        name: Blind 5 Encoder Position Raw
+      speed:
+        name: Blind 5 Servo Speed
+      load:
+        name: Blind 5 Servo Torque Output
+      temperature:
+        name: Blind 5 Servo Temperature
+      voltage:
+        name: Blind 5 Servo Voltage
+      current:
+        name: Blind 5 Servo Current
+      status:
+        name: Blind 5 Servo Status
+      moving:
+        name: Blind 5 Servo Moving
+      torque_enabled:
+        name: Blind 5 Torque Enabled
+      multi_turn_mode:
+        name: Blind 5 Multi-Turn Mode Active
+      speed_limit:
+        name: Blind 5 Speed Limit
+        mode: slider
+      acceleration:
+        name: Blind 5 Acceleration
+        mode: slider
+      torque_limit:
+        name: Blind 5 Torque Limit
+        mode: slider
+      calibration:
+        auto_calibrate:
+          name: Blind 5 Auto Calibrate
+        negative_direction:
+          name: Blind 5 Negative Direction
+        reset_blinds:
+          name: Blind 5 Reset Calibration
+        status:
+          name: Blind 5 Calibration Status
+        jog_increment:
+          name: Blind 5 Jog Increment
+        jog_forward:
+          name: Blind 5 Jog Forward
+        jog_reverse:
+          name: Blind 5 Jog Reverse
+        set_down:
+          name: Blind 5 Set Fully Down
+        set_middle:
+          name: Blind 5 Set Middle
+        set_up:
+          name: Blind 5 Set Fully Up
+
+    - servo_id: 4
+      inverted: false
+      initial_speed: 90
+      initial_acceleration: 20
+      max_acceleration: 50
+      initial_torque_limit: 30
+      # Every decreasing tilt transition first travels through 0% so gravity
+      # settles the blind leaves consistently. Increasing transitions are direct.
+      gravity_return_to_zero: true
+      cover:
+        name: Blind 4
+      position:
+        name: Blind 4 Encoder Position
+      position_raw:
+        name: Blind 4 Encoder Position Raw
+      speed:
+        name: Blind 4 Servo Speed
+      load:
+        name: Blind 4 Servo Torque Output
+      temperature:
+        name: Blind 4 Servo Temperature
+      voltage:
+        name: Blind 4 Servo Voltage
+      current:
+        name: Blind 4 Servo Current
+      status:
+        name: Blind 4 Servo Status
+      moving:
+        name: Blind 4 Servo Moving
+      torque_enabled:
+        name: Blind 4 Torque Enabled
+      multi_turn_mode:
+        name: Blind 4 Multi-Turn Mode Active
+      speed_limit:
+        name: Blind 4 Speed Limit
+        mode: slider
+      acceleration:
+        name: Blind 4 Acceleration
+        mode: slider
+      torque_limit:
+        name: Blind 4 Torque Limit
+        mode: slider
+      calibration:
+        auto_calibrate:
+          name: Blind 4 Auto Calibrate
+        negative_direction:
+          name: Blind 4 Negative Direction
+        reset_blinds:
+          name: Blind 4 Reset Calibration
+        status:
+          name: Blind 4 Calibration Status
+        jog_increment:
+          name: Blind 4 Jog Increment
+        jog_forward:
+          name: Blind 4 Jog Forward
+        jog_reverse:
+          name: Blind 4 Jog Reverse
+        set_down:
+          name: Blind 4 Set Fully Down
+        set_middle:
+          name: Blind 4 Set Middle
+        set_up:
+          name: Blind 4 Set Fully Up
+
+    - servo_id: 3
+      inverted: false
+      initial_speed: 90
+      initial_acceleration: 20
+      max_acceleration: 50
+      initial_torque_limit: 30
+      # Every decreasing tilt transition first travels through 0% so gravity
+      # settles the blind leaves consistently. Increasing transitions are direct.
+      gravity_return_to_zero: true
+      cover:
+        name: Blind 3
+      position:
+        name: Blind 3 Encoder Position
+      position_raw:
+        name: Blind 3 Encoder Position Raw
+      speed:
+        name: Blind 3 Servo Speed
+      load:
+        name: Blind 3 Servo Torque Output
+      temperature:
+        name: Blind 3 Servo Temperature
+      voltage:
+        name: Blind 3 Servo Voltage
+      current:
+        name: Blind 3 Servo Current
+      status:
+        name: Blind 3 Servo Status
+      moving:
+        name: Blind 3 Servo Moving
+      torque_enabled:
+        name: Blind 3 Torque Enabled
+      multi_turn_mode:
+        name: Blind 3 Multi-Turn Mode Active
+      speed_limit:
+        name: Blind 3 Speed Limit
+        mode: slider
+      acceleration:
+        name: Blind 3 Acceleration
+        mode: slider
+      torque_limit:
+        name: Blind 3 Torque Limit
+        mode: slider
+      calibration:
+        auto_calibrate:
+          name: Blind 3 Auto Calibrate
+        negative_direction:
+          name: Blind 3 Negative Direction
+        reset_blinds:
+          name: Blind 3 Reset Calibration
+        status:
+          name: Blind 3 Calibration Status
+        jog_increment:
+          name: Blind 3 Jog Increment
+        jog_forward:
+          name: Blind 3 Jog Forward
+        jog_reverse:
+          name: Blind 3 Jog Reverse
+        set_down:
+          name: Blind 3 Set Fully Down
+        set_middle:
+          name: Blind 3 Set Middle
+        set_up:
+          name: Blind 3 Set Fully Up
+
+    - servo_id: 2
+      inverted: false
+      initial_speed: 90
+      initial_acceleration: 20
+      max_acceleration: 50
+      initial_torque_limit: 30
+      # Every decreasing tilt transition first travels through 0% so gravity
+      # settles the blind leaves consistently. Increasing transitions are direct.
+      gravity_return_to_zero: true
+      cover:
+        name: Blind 2
+      position:
+        name: Blind 2 Encoder Position
+      position_raw:
+        name: Blind 2 Encoder Position Raw
+      speed:
+        name: Blind 2 Servo Speed
+      load:
+        name: Blind 2 Servo Torque Output
+      temperature:
+        name: Blind 2 Servo Temperature
+      voltage:
+        name: Blind 2 Servo Voltage
+      current:
+        name: Blind 2 Servo Current
+      status:
+        name: Blind 2 Servo Status
+      moving:
+        name: Blind 2 Servo Moving
+      torque_enabled:
+        name: Blind 2 Torque Enabled
+      multi_turn_mode:
+        name: Blind 2 Multi-Turn Mode Active
+      speed_limit:
+        name: Blind 2 Speed Limit
+        mode: slider
+      acceleration:
+        name: Blind 2 Acceleration
+        mode: slider
+      torque_limit:
+        name: Blind 2 Torque Limit
+        mode: slider
+      calibration:
+        auto_calibrate:
+          name: Blind 2 Auto Calibrate
+        negative_direction:
+          name: Blind 2 Negative Direction
+        reset_blinds:
+          name: Blind 2 Reset Calibration
+        status:
+          name: Blind 2 Calibration Status
+        jog_increment:
+          name: Blind 2 Jog Increment
+        jog_forward:
+          name: Blind 2 Jog Forward
+        jog_reverse:
+          name: Blind 2 Jog Reverse
+        set_down:
+          name: Blind 2 Set Fully Down
+        set_middle:
+          name: Blind 2 Set Middle
+        set_up:
+          name: Blind 2 Set Fully Up
+
+    - servo_id: 1
+      inverted: false
+      initial_speed: 90
+      initial_acceleration: 20
+      max_acceleration: 50
+      initial_torque_limit: 30
+      # Every decreasing tilt transition first travels through 0% so gravity
+      # settles the blind leaves consistently. Increasing transitions are direct.
+      gravity_return_to_zero: true
+      cover:
+        name: Blind 1
+      position:
+        name: Blind 1 Encoder Position
+      position_raw:
+        name: Blind 1 Encoder Position Raw
+      speed:
+        name: Blind 1 Servo Speed
+      load:
+        name: Blind 1 Servo Torque Output
+      temperature:
+        name: Blind 1 Servo Temperature
+      voltage:
+        name: Blind 1 Servo Voltage
+      current:
+        name: Blind 1 Servo Current
+      status:
+        name: Blind 1 Servo Status
+      moving:
+        name: Blind 1 Servo Moving
+      torque_enabled:
+        name: Blind 1 Torque Enabled
+      multi_turn_mode:
+        name: Blind 1 Multi-Turn Mode Active
+      speed_limit:
+        name: Blind 1 Speed Limit
+        mode: slider
+      acceleration:
+        name: Blind 1 Acceleration
+        mode: slider
+      torque_limit:
+        name: Blind 1 Torque Limit
+        mode: slider
+      calibration:
+        auto_calibrate:
+          name: Blind 1 Auto Calibrate
+        negative_direction:
+          name: Blind 1 Negative Direction
+        reset_blinds:
+          name: Blind 1 Reset Calibration
+        status:
+          name: Blind 1 Calibration Status
+        jog_increment:
+          name: Blind 1 Jog Increment
+        jog_forward:
+          name: Blind 1 Jog Forward
+        jog_reverse:
+          name: Blind 1 Jog Reverse
+        set_down:
+          name: Blind 1 Set Fully Down
+        set_middle:
+          name: Blind 1 Set Middle
+        set_up:
+          name: Blind 1 Set Fully Up
