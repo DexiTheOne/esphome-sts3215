@@ -153,6 +153,7 @@ struct STS3215PreferenceData {
 };
 
 struct STS3215Servo {
+  uint32_t active_batch{0};
   uint8_t id;
   bool inverted;
   uint32_t preference_key;
@@ -212,6 +213,8 @@ struct STS3215Servo {
 struct STS3215QueuedMove {
   uint8_t servo_id;
   int32_t target_raw;
+  uint32_t batch{0};
+  bool batch_started{false};
 };
 
 class STS3215Component : public PollingComponent, public uart::UARTDevice {
@@ -221,6 +224,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void update() override;
   void dump_config() override;
 
+  void set_ripple(bool value) { ripple_ = value; }
   void set_overlapping(bool value) { overlapping_ = value; }
   void set_start_delay(uint32_t value) { start_delay_ms_ = value; }
   void set_move_timeout(uint32_t value) { move_timeout_ms_ = value; }
@@ -304,6 +308,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void poll_servo_(STS3215Servo &servo);
   void begin_move_(STS3215Servo &servo, int32_t target_raw);
   void finish_move_(STS3215Servo &servo, bool timed_out);
+  void command_ripple_(float position, bool stepping, bool increase);
   void enqueue_move_(uint8_t servo_id, int32_t target_raw);
   void enqueue_cover_sequence_(uint8_t servo_id, int32_t intermediate_raw, int32_t target_raw);
   void remove_queued_(uint8_t servo_id);
@@ -346,6 +351,10 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   STS3215GroupCover *group_cover_{nullptr};
   uint32_t response_timeout_ms_{50};
   bool overlapping_{false};
+  bool ripple_{false};
+  uint32_t next_batch_{0};
+  uint32_t enqueue_batch_{0};
+  uint32_t last_batch_started_{0};
   uint32_t start_delay_ms_{2000};
   uint32_t move_timeout_ms_{120000};
   uint16_t position_tolerance_{5};

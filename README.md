@@ -399,6 +399,27 @@ Starts may be later while the bus wakes or a servo is unavailable; physical
 motion onset is not used as the timer. Overlapping movements draw power at the
 same time, so size the shared supply for the concurrent running load.
 
+Set `movement_order: ripple` to move the aggregate cover from the outside
+inward, using the physical order in `servos:`. For `[6, 5, 4]`, the pairs are
+`6 + 4`, then `5`. For `[6, 5, 4, 3]`, they are `6 + 3`, then `5 + 4`.
+An odd list moves its center blind once. Uncalibrated blinds are skipped without
+changing which physical positions are paired.
+
+```yaml
+sts3215:
+  movement_mode: staggered
+  movement_order: ripple
+  start_delay: 2s
+```
+
+Pair members start together with no configured delay between them (their UART
+commands are sent consecutively). With `staggered`, the next pair waits for
+both members and all their gravity-return steps to finish, and for the start
+delay to elapse. With `overlapping`, the next pair can start after `start_delay`
+from the preceding pair's first start, while that pair continues moving.
+Ripple applies to `main_cover` tilt and open/close commands; individual blind
+commands retain their normal scheduling. The default order is `listed`.
+
 Copy a servo list item and give it a unique ID to scale from one motor to six or
 more.
 

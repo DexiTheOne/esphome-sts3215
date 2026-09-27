@@ -222,7 +222,22 @@ void STS3215Component::loop() {
     });
     if (next == move_queue_.end()) return;
   }
+  // In staggered ripple mode, both members of the front pair may run, but
+  // their remaining steps must finish before the next pair starts.
+  if (!overlapping_ && next->batch != 0) {
+    const uint32_t batch = next->batch;
+    next = std::find_if(move_queue_.begin(), move_queue_.end(), [this, batch](const STS3215QueuedMove &candidate) {
+      const auto *candidate_servo = find_servo_(candidate.servo_id);
+      return candidate.batch == batch && (candidate_servo == nullptr || !candidate_servo->command_active);
+    });
+    if (next == move_queue_.end()) return;
+  }
   const auto move = *next;
+  if (!overlapping_ && std::any_of(servos_.begin(), servos_.end(), [&move](const STS3215Servo &active) {
+        return active.command_active && active.active_batch != move.batch &&
+               (active.active_batch != 0 || move.batch != 0);
+      }))
+    return;
   auto *servo = find_servo_(move.servo_id);
   if (servo == nullptr) {
     move_queue_.erase(next);
@@ -249,17 +264,32 @@ void STS3215Component::loop() {
     return;
   }
   const bool same_servo = has_started_move_ && last_move_servo_id_ == move.servo_id;
-  if (has_started_move_ && !same_servo &&
-      static_cast<uint32_t>(now - last_move_started_) < start_delay_ms_)
-    return;
+  if (move.batch != 0) {
+    // Pair members and later gravity-return steps share one launch interval.
+    if (!move.batch_started && has_started_move_ &&
+        static_cast<uint32_t>(now - last_batch_started_) < start_delay_ms_)
+      return;
+    if (!move.batch_started) {
+      last_batch_started_ = now;
+      for (auto &queued : move_queue_)
+        if (queued.batch == move.batch) queued.batch_started = true;
+    }
+  } else {
+    if (has_started_move_ && !same_servo &&
+        static_cast<uint32_t>(now - last_move_started_) < start_delay_ms_)
+      return;
+    last_batch_started_ = now;
+  }
   move_queue_.erase(next);
   begin_move_(*servo, move.target_raw);
+  servo->active_batch = move.batch;
 }
 
 void STS3215Component::dump_config() {
   ESP_LOGCONFIG(TAG, "STS3215:");
   ESP_LOGCONFIG(TAG, "  UART packet trace: %s", YESNO(uart_trace_));
   LOG_UPDATE_INTERVAL(this);
+  ESP_LOGCONFIG(TAG, "  Movement order: %s", ripple_ ? "ripple" : "listed");
   ESP_LOGCONFIG(TAG, "  Movement mode: %s", overlapping_ ? "overlapping" : "staggered");
   ESP_LOGCONFIG(TAG, "  Inter-motor start delay: %u ms", static_cast<unsigned>(start_delay_ms_));
   ESP_LOGCONFIG(TAG, "  Move timeout: %u ms", static_cast<unsigned>(move_timeout_ms_));
@@ -636,18 +666,20 @@ void STS3215Component::enqueue_move_(uint8_t servo_id, int32_t target_raw) {
       [servo_id](const STS3215QueuedMove &move) { return move.servo_id == servo_id; });
   if (existing != move_queue_.end()) {
     existing->target_raw = target_raw;
+    existing->batch = enqueue_batch_;
+    existing->batch_started = false;
     move_queue_.erase(std::remove_if(std::next(existing), move_queue_.end(),
         [servo_id](const STS3215QueuedMove &move) { return move.servo_id == servo_id; }), move_queue_.end());
   } else {
-    move_queue_.push_back({servo_id, target_raw});
+    move_queue_.push_back({servo_id, target_raw, enqueue_batch_});
   }
 }
 
 void STS3215Component::enqueue_cover_sequence_(uint8_t servo_id, int32_t intermediate_raw,
                                                int32_t target_raw) {
   remove_queued_(servo_id);
-  move_queue_.push_back({servo_id, intermediate_raw});
-  move_queue_.push_back({servo_id, target_raw});
+  move_queue_.push_back({servo_id, intermediate_raw, enqueue_batch_});
+  move_queue_.push_back({servo_id, target_raw, enqueue_batch_});
 }
 
 bool STS3215Component::pending_target_(const STS3215Servo &servo, int32_t &target_raw) const {
@@ -1206,7 +1238,33 @@ void STS3215Component::command_cover(uint8_t servo_id, float position) {
   }
 }
 
+void STS3215Component::command_ripple_(float position, bool stepping, bool increase) {
+  // A replacement group command rebuilds pair order, even if an earlier
+  // request has already consumed some of its outer moves.
+  for (auto &servo : servos_)
+    if (calibrated_(servo)) remove_queued_(servo.id);
+  for (size_t outer = 0; outer < (servos_.size() + 1) / 2; outer++) {
+    if (++next_batch_ == 0) ++next_batch_;
+    enqueue_batch_ = next_batch_;
+    const size_t inner = servos_.size() - 1 - outer;
+    for (const size_t index : {outer, inner}) {
+      auto &servo = servos_[index];
+      if (calibrated_(servo)) {
+        if (stepping) step_cover(servo.id, increase);
+        else command_cover(servo.id, position);
+      }
+      if (outer == inner) break;  // An odd-sized list has a single center blind.
+    }
+  }
+  enqueue_batch_ = 0;
+  update_group_cover_();
+}
+
 void STS3215Component::command_all_covers(float position) {
+  if (ripple_) {
+    command_ripple_(position, false, false);
+    return;
+  }
   for (auto &servo : servos_)
     if (calibrated_(servo))
       command_cover(servo.id, position);
@@ -1239,6 +1297,10 @@ void STS3215Component::step_cover(uint8_t servo_id, bool increase) {
 }
 
 void STS3215Component::step_all_covers(bool increase) {
+  if (ripple_) {
+    command_ripple_(0.0f, true, increase);
+    return;
+  }
   for (auto &servo : servos_)
     if (calibrated_(servo))
       step_cover(servo.id, increase);

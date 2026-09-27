@@ -42,6 +42,15 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(cv.Invalid):
             component.CONFIG_SCHEMA({**base, "movement_mode": "unknown"})
 
+    def test_ripple_order(self):
+        base = {"servos": [{"servo_id": 6}, {"servo_id": 5}, {"servo_id": 4}]}
+        self.assertEqual(component.CONFIG_SCHEMA(base)["movement_order"], "listed")
+        for mode in ("staggered", "overlapping"):
+            config = component.CONFIG_SCHEMA({**base, "movement_mode": mode, "movement_order": "ripple"})
+            self.assertEqual(config["movement_order"], "ripple")
+        with self.assertRaises(cv.Invalid):
+            component.CONFIG_SCHEMA({**base, "movement_order": "unknown"})
+
     def test_duplicate_servo_ids(self):
         with self.assertRaises(cv.Invalid):
             component.CONFIG_SCHEMA({"servos": [{"servo_id": 1}, {"servo_id": 1}]})
