@@ -195,10 +195,26 @@ after that is a read-only no-op, which avoids repeated EEPROM wear.
 
 Use [`examples/xiao_esp32s3_provision.yaml`](examples/xiao_esp32s3_provision.yaml)
 as temporary provisioning firmware. Connect **only one servo** to the bus,
-then set **Current Servo ID** (initially 1) and **New Servo ID** (initially 2)
-in Home Assistant and press **Set Servo ID**. Valid IDs are 0–253. Changing
-either selector alone does not write the motor. **Servo ID Provisioning Status**
+then wait for the read-only **Current Servo ID** sensor to identify the motor.
+Set **New Servo ID** (initially 2) in Home Assistant and press **Set Servo ID**.
+Valid IDs are 0–253. Changing the new-ID selector alone does not write the motor.
+**Servo ID Provisioning Status**
 shows the outcome, and ESPHome logs include the old and new IDs.
+
+The current ID is detected at startup and checked every two seconds using
+read-only broadcast PING followed by a register-5 read at the responding ID.
+**Identify Connected Servo** requests an immediate check after swapping motors.
+The provisioning supply stays enabled while this firmware is running.
+An absent or unreadable motor makes the current-ID sensor unavailable.
+After Apply, the readout changes only after the new ID and EEPROM lock both
+verify; the Success status is published afterward. Failed verification clears
+the readout and pauses discovery until **Identify Connected Servo** is pressed
+again, preserving the failure status. Discovery also pauses during the ID-change
+transaction.
+
+When upgrading an older provisioning YAML, remove `mode: box` from `current_id`:
+it is now a Sensor, not a Number. Home Assistant may retain the old, unavailable
+Current Servo ID Number until you remove that obsolete entity.
 
 The explicit button/action checks the source ID, rejects a responding motor
 at the new ID, checks that the motor is stationary, disables and verifies

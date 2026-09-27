@@ -35,7 +35,10 @@ static float next_cover_quarter(float tilt, bool increase) {
 
 void STS3215Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up STS3215 bus with %u servo(s)...", static_cast<unsigned>(servos_.size()));
-  if (servos_.empty()) publish_id_status_("Ready: connect one servo and select its current and new IDs");
+  if (servos_.empty()) {
+    if (current_id_sensor_ != nullptr) current_id_sensor_->publish_state(NAN);
+    publish_id_status_("Detecting the connected servo; select only the new ID");
+  }
   if (power_pin_ != nullptr) {
     power_pin_->setup();
     power_pin_->digital_write(false);
@@ -163,7 +166,8 @@ void STS3215Component::loop() {
     bool active = false;
     for (const auto &servo : servos_) active |= servo.command_active;
     const bool idle = move_queue_.empty() && calibration_queue_.empty() && pending_commission_ids_.empty() &&
-                      commission_state_ == COMMISSION_IDLE && id_change_state_ == ID_IDLE && !active;
+                      commission_state_ == COMMISSION_IDLE && id_change_state_ == ID_IDLE && !active &&
+                      !(servos_.empty() && current_id_sensor_ != nullptr);
     if (power_on_ && idle) {
       if (!idle_timer_active_) {
         idle_since_ = millis();
@@ -178,6 +182,11 @@ void STS3215Component::loop() {
   }
   if (id_change_state_ != ID_IDLE) {
     process_id_change_();
+    return;
+  }
+  if (servos_.empty() && current_id_sensor_ != nullptr && !id_detection_paused_ &&
+      (id_detection_pending_ || static_cast<int32_t>(millis() - next_id_detection_ms_) >= 0)) {
+    detect_current_id_();
     return;
   }
   if (!calibration_queue_.empty()) {
@@ -379,7 +388,8 @@ bool STS3215Component::read_byte_timeout_(uint8_t *data, uint32_t deadline) {
   return false;
 }
 
-bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, uint8_t expected_length) {
+bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, uint8_t expected_length,
+                                         uint8_t *received_id) {
   const uint32_t deadline = millis() + response_timeout_ms_;
   uint8_t received[128];
   size_t received_count = 0;
@@ -412,7 +422,8 @@ bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, u
     }
     if (packet_length < 2 || packet_length > 64) continue;
 
-    const bool expected = id == expected_id && packet_length == expected_length + 2;
+    const bool expected = (expected_id == 0xFE ? id <= 253 : id == expected_id) &&
+                          packet_length == expected_length + 2;
     uint8_t checksum_sum = id + packet_length + error;
     // LENGTH counts the error byte, parameter bytes, and checksum. Consume
     // complete packets so a late write acknowledgement cannot be mistaken for
@@ -443,6 +454,7 @@ bool STS3215Component::read_status_packet_(uint8_t expected_id, uint8_t *data, u
     }
     if (error != 0)
       ESP_LOGW(TAG, "Servo %u returned status flags 0x%02X", expected_id, error);
+    if (received_id != nullptr) *received_id = id;
     log_received();
     return true;
   }
@@ -735,6 +747,55 @@ void STS3215Component::publish_id_status_(const char *status) {
   if (id_status_sensor_ != nullptr) id_status_sensor_->publish_state(status);
 }
 
+void STS3215Component::publish_detected_id_(uint8_t value) {
+  detected_id_ = value;
+  detected_id_valid_ = true;
+  next_id_detection_ms_ = millis() + 2000;
+  if (current_id_sensor_ != nullptr) current_id_sensor_->publish_state(value);
+}
+
+void STS3215Component::request_id_detection() {
+  if (!servos_.empty() || id_change_state_ != ID_IDLE) return;
+  detected_id_valid_ = false;
+  if (current_id_sensor_ != nullptr) current_id_sensor_->publish_state(NAN);
+  id_detection_pending_ = true;
+  id_detection_paused_ = false;
+  publish_id_status_("Detecting the connected servo");
+}
+
+void STS3215Component::detect_current_id_() {
+  // Feetech broadcast PING returns the ID of a single connected motor.
+  // Confirm register 5 at that address before publishing or using it.
+  const uint8_t ping[] = {0xFF, 0xFF, 0xFE, 2, 1, 0xFE};
+  clear_rx_();
+  log_uart_bytes_("TX identify", ping, sizeof(ping));
+  write_array(ping, sizeof(ping));
+  flush();
+  uint8_t detected, stored_id;
+  if (read_status_packet_(0xFE, nullptr, 0, &detected) &&
+      read_register_(detected, REG_ID, &stored_id, 1) && stored_id == detected) {
+    const bool changed = !detected_id_valid_ || detected_id_ != detected || id_detection_pending_;
+    publish_detected_id_(detected);
+    if (changed) publish_id_status_("Connected servo ID detected; ready to provision");
+  } else {
+    if (detected_id_valid_ || id_detection_pending_)
+      publish_id_status_("No servo detected; connect one motor and check power/UART");
+    detected_id_valid_ = false;
+    if (current_id_sensor_ != nullptr) current_id_sensor_->publish_state(NAN);
+  }
+  id_detection_pending_ = false;
+  next_id_detection_ms_ = millis() + 2000;
+}
+
+void STS3215Component::provision_selected_id() {
+  if (!detected_id_valid_) {
+    publish_id_status_("No verified current ID; identify the connected servo first");
+    id_detection_pending_ = true;
+    return;
+  }
+  set_servo_id(detected_id_, selected_new_id_);
+}
+
 void STS3215Component::set_servo_id(int32_t current_id, int32_t new_id) {
   if (current_id < 0 || current_id > 253 || new_id < 0 || new_id > 253) {
     publish_id_status_("Rejected: IDs must be integers from 0 to 253");
@@ -752,6 +813,7 @@ void STS3215Component::set_servo_id(int32_t current_id, int32_t new_id) {
   provisioning_new_id_ = static_cast<uint8_t>(new_id);
   id_unlock_attempted_ = false;
   id_write_attempted_ = false;
+  id_detection_paused_ = false;
   id_change_state_ = ID_WAIT_POWER;
   id_change_next_ms_ = millis();
   publish_id_status_("Provisioning: checking connected servo");
@@ -768,6 +830,10 @@ void STS3215Component::fail_id_change_(const char *reason) {
   }
   ESP_LOGE(TAG, "Servo ID %u -> %u failed: %s", provisioning_current_id_, provisioning_new_id_, reason);
   publish_id_status_(reason);
+  detected_id_valid_ = false;
+  if (current_id_sensor_ != nullptr) current_id_sensor_->publish_state(NAN);
+  id_detection_pending_ = false;
+  id_detection_paused_ = true;
   id_change_state_ = ID_IDLE;
 }
 
@@ -787,6 +853,7 @@ void STS3215Component::process_id_change_() {
         return;
       }
       if (source == target) {
+        publish_detected_id_(target);
         publish_id_status_("Verified: current and new IDs match; EEPROM unchanged");
         id_change_state_ = ID_IDLE;
         return;
@@ -844,6 +911,7 @@ void STS3215Component::process_id_change_() {
         return;
       }
       ESP_LOGI(TAG, "Servo ID changed from %u to %u; EEPROM relocked, torque remains off", source, target);
+      publish_detected_id_(target);
       publish_id_status_("Success: new ID verified and EEPROM locked; torque off");
       id_change_state_ = ID_IDLE;
       return;
@@ -1387,12 +1455,14 @@ void STS3215CalibrationButton::press_action() {
 
 void STS3215IDNumber::control(float value) {
   if (parent_ == nullptr || !std::isfinite(value) || value < 0 || value > 253 || value != std::floor(value)) return;
-  parent_->set_selected_id(destination_, static_cast<uint8_t>(value));
+  parent_->set_selected_id(static_cast<uint8_t>(value));
   publish_state(value);
 }
 
 void STS3215SetIDButton::press_action() {
-  if (parent_ != nullptr) parent_->provision_selected_id();
+  if (parent_ == nullptr) return;
+  if (discovery_) parent_->request_id_detection();
+  else parent_->provision_selected_id();
 }
 
 void STS3215PresetButton::press_action() {

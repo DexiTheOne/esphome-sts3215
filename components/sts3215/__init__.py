@@ -64,6 +64,7 @@ CONF_PROVISIONING = "provisioning"
 CONF_CURRENT_ID = "current_id"
 CONF_NEW_ID = "new_id"
 CONF_SET_ID = "set_id"
+CONF_IDENTIFY = "identify"
 
 sts3215_ns = cg.esphome_ns.namespace("sts3215")
 STS3215Component = sts3215_ns.class_("STS3215Component", cg.PollingComponent, uart.UARTDevice)
@@ -180,12 +181,14 @@ SERVO_SCHEMA = cv.Schema({
 })
 
 PROVISIONING_SCHEMA = cv.Schema({
-    cv.Required(CONF_CURRENT_ID): number.number_schema(
-        STS3215IDNumber, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:identifier"),
+    cv.Required(CONF_CURRENT_ID): sensor.sensor_schema(
+        accuracy_decimals=0, entity_category=ENTITY_CATEGORY_DIAGNOSTIC, icon="mdi:identifier"),
     cv.Required(CONF_NEW_ID): number.number_schema(
         STS3215IDNumber, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:identifier"),
     cv.Required(CONF_SET_ID): button.button_schema(
         STS3215SetIDButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:content-save"),
+    cv.Optional(CONF_IDENTIFY): button.button_schema(
+        STS3215SetIDButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:magnify"),
     cv.Optional(CONF_STATUS): text_sensor.text_sensor_schema(
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
 })
@@ -234,13 +237,17 @@ async def to_code(config):
         cg.add(var.set_power_pin(pin))
 
     if panel := config.get(CONF_PROVISIONING):
-        for key, destination, initial in [(CONF_CURRENT_ID, False, 1), (CONF_NEW_ID, True, 2)]:
-            selector = await number.new_number(panel[key], min_value=0, max_value=253, step=1)
-            cg.add(selector.set_parent(var))
-            cg.add(selector.set_destination(destination))
-            cg.add(selector.publish_state(initial))
+        current = await sensor.new_sensor(panel[CONF_CURRENT_ID])
+        cg.add(var.set_current_id_sensor(current))
+        selector = await number.new_number(panel[CONF_NEW_ID], min_value=0, max_value=253, step=1)
+        cg.add(selector.set_parent(var))
+        cg.add(selector.publish_state(2))
         btn = await button.new_button(panel[CONF_SET_ID])
         cg.add(btn.set_parent(var))
+        if CONF_IDENTIFY in panel:
+            identify = await button.new_button(panel[CONF_IDENTIFY])
+            cg.add(identify.set_parent(var))
+            cg.add(identify.set_discovery(True))
         if CONF_STATUS in panel:
             status = await text_sensor.new_text_sensor(panel[CONF_STATUS])
             cg.add(var.set_id_status_sensor(status))

@@ -26,19 +26,19 @@ class STS3215Component;
 class STS3215IDNumber : public number::Number {
  public:
   void set_parent(STS3215Component *parent) { parent_ = parent; }
-  void set_destination(bool value) { destination_ = value; }
  protected:
   void control(float value) override;
   STS3215Component *parent_{nullptr};
-  bool destination_{false};
 };
 
 class STS3215SetIDButton : public button::Button {
  public:
   void set_parent(STS3215Component *parent) { parent_ = parent; }
+  void set_discovery(bool value) { discovery_ = value; }
  protected:
   void press_action() override;
   STS3215Component *parent_{nullptr};
+  bool discovery_{false};
 };
 
 class STS3215PositionNumber : public number::Number {
@@ -259,12 +259,11 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool set_jog_increment(uint8_t servo_id, float degrees);
   void commission_step_mode(uint8_t servo_id);
   void set_servo_id(int32_t current_id, int32_t new_id);
-  void set_selected_id(bool destination, uint8_t value) {
-    if (destination) selected_new_id_ = value;
-    else selected_current_id_ = value;
-  }
-  void provision_selected_id() { set_servo_id(selected_current_id_, selected_new_id_); }
+  void set_selected_id(uint8_t value) { selected_new_id_ = value; }
+  void provision_selected_id();
+  void request_id_detection();
   void set_id_status_sensor(text_sensor::TextSensor *sensor) { id_status_sensor_ = sensor; }
+  void set_current_id_sensor(sensor::Sensor *sensor) { current_id_sensor_ = sensor; }
   void calibration_action(uint8_t servo_id, uint8_t action);
   void command_cover(uint8_t servo_id, float position);
   void command_all_covers(float position);
@@ -294,7 +293,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   STS3215Servo *find_servo_(uint8_t servo_id);
   bool read_register_(uint8_t, uint8_t, uint8_t *, uint8_t);
   bool write_register_(uint8_t, uint8_t, const uint8_t *, uint8_t);
-  bool read_status_packet_(uint8_t, uint8_t *, uint8_t);
+  bool read_status_packet_(uint8_t, uint8_t *, uint8_t, uint8_t *received_id = nullptr);
   bool read_byte_timeout_(uint8_t *, uint32_t);
   void clear_rx_();
   void log_uart_bytes_(const char *label, const uint8_t *data, size_t length);
@@ -318,6 +317,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void process_id_change_();
   void fail_id_change_(const char *reason);
   void publish_id_status_(const char *status);
+  void detect_current_id_();
+  void publish_detected_id_(uint8_t value);
   bool update_commission_state_(STS3215Servo &servo, bool log_result, bool *read_success = nullptr);
   void set_hardware_position_(STS3215Servo &servo, int32_t hardware_position);
   bool calibrated_(const STS3215Servo &servo) const {
@@ -380,7 +381,11 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
     ID_WRITE, ID_RELOCK, ID_VERIFY,
   };
   IDChangeState id_change_state_{ID_IDLE};
-  uint8_t selected_current_id_{1};
+  uint8_t detected_id_{0};
+  bool detected_id_valid_{false};
+  bool id_detection_pending_{true};
+  bool id_detection_paused_{false};
+  uint32_t next_id_detection_ms_{0};
   uint8_t selected_new_id_{2};
   uint8_t provisioning_current_id_{0};
   uint8_t provisioning_new_id_{0};
@@ -388,6 +393,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool id_unlock_attempted_{false};
   bool id_write_attempted_{false};
   text_sensor::TextSensor *id_status_sensor_{nullptr};
+  sensor::Sensor *current_id_sensor_{nullptr};
 };
 
 template<typename... Ts> class STS3215StepAction : public Action<Ts...>, public Parented<STS3215Component> {

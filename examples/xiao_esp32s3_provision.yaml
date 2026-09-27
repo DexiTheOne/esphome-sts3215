@@ -1,5 +1,5 @@
 # Temporary provisioning firmware: connect only ONE servo to the powered bus.
-# Select its current ID and desired new ID in Home Assistant, then press Set ID.
+# Current ID is detected automatically; select only the new ID, then Set ID.
 # After provisioning all motors, flash the normal blind YAML with their new IDs.
 esphome:
   name: sts3215-blind-demo
@@ -44,11 +44,12 @@ sts3215:
   provisioning:
     current_id:
       name: Current Servo ID
-      mode: box
     new_id:
       name: New Servo ID
       mode: box
     set_id:
       name: Set Servo ID
+    identify:
+      name: Identify Connected Servo
     status:
       name: Servo ID Provisioning Status

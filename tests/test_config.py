@@ -39,6 +39,13 @@ class ConfigTests(unittest.TestCase):
     def test_panel_without_servos(self):
         config = component.CONFIG_SCHEMA({"provisioning": self.panel()})
         self.assertEqual(config["servos"], [])
+        self.assertEqual(config["provisioning"]["current_id"]["id"].type, component.sensor.Sensor)
+
+    def test_current_id_rejects_editable_number_options(self):
+        panel = self.panel()
+        panel["current_id"]["mode"] = "box"
+        with self.assertRaises(cv.Invalid):
+            component.CONFIG_SCHEMA({"provisioning": panel})
 
     def test_empty_normal_component(self):
         with self.assertRaises(cv.Invalid):
