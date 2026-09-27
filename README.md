@@ -380,8 +380,8 @@ received at nearly the same time cannot start all motors together. The main
 cover queues calibrated servos in their `servos:` list order and reports their
 average tilt and openness. The delay applies when starting different motors;
 successive commands for one motor begin as soon as its active move completes.
-The default `movement_mode: staggered` preserves queue order, so a blind's
-buffered gravity-return steps can hold up later blinds. Choose `overlapping`
+The default `movement_mode: staggered` completes the active blind (or ripple
+pair), including its gravity-return steps, before starting the next. Choose `overlapping`
 to let the next available blind start while previous blinds are still moving:
 
 ```yaml
@@ -417,6 +417,12 @@ commands are sent consecutively). With `staggered`, the next pair waits for
 both members and all their gravity-return steps to finish, and for the start
 delay to elapse. With `overlapping`, the next pair can start after `start_delay`
 from the preceding pair's first start, while that pair continues moving.
+Repeating the same final tilt preserves the pending gravity-return sequence.
+Group quarter-step commands use the final queued tilt, even while a blind is
+traveling through its intermediate zero position. Writes consume optional
+servo acknowledgements before the next UART command to avoid overlapping
+host commands with servo replies on the shared bus.
+
 Ripple applies to `main_cover` tilt and open/close commands; individual blind
 commands retain their normal scheduling. The default order is `listed`.
 

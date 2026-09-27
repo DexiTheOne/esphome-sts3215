@@ -308,6 +308,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void poll_servo_(STS3215Servo &servo);
   void begin_move_(STS3215Servo &servo, int32_t target_raw);
   void finish_move_(STS3215Servo &servo, bool timed_out);
+  void command_cover_from_(uint8_t servo_id, float position, int32_t previous_target);
+  float cover_step_target_(const STS3215Servo &servo, int32_t planned_target, bool increase) const;
   void command_ripple_(float position, bool stepping, bool increase);
   void enqueue_move_(uint8_t servo_id, int32_t target_raw);
   void enqueue_cover_sequence_(uint8_t servo_id, int32_t intermediate_raw, int32_t target_raw);

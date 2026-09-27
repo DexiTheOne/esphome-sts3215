@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def function(source, name):
-    start = re.search(rf"(?:void|bool) STS3215Component::{name}\(", source).start()
+    start = re.search(rf"(?:void|bool|float) STS3215Component::{name}\(", source).start()
     opening = source.index("{", start)
     depth = 1
     end = opening + 1

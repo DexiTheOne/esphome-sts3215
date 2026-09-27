@@ -10,11 +10,15 @@ from test_id_provisioning import ROOT, function
 def main():
     loop = function((ROOT / "components/sts3215/sts3215.cpp").read_text(), "loop")
     ripple = function((ROOT / "components/sts3215/sts3215.cpp").read_text(), "command_ripple_")
+    source = (ROOT / "components/sts3215/sts3215.cpp").read_text()
+    commands = "\n".join(function(source, name) for name in (
+        "enqueue_move_", "enqueue_cover_sequence_", "pending_target_", "command_cover_from_", "cover_step_target_"))
     scheduler = loop[loop.index("  if (move_queue_.empty()) return;"):]
     harness = r'''
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
+#include <cmath>
 #include <deque>
 #include <vector>
 #define ESP_LOGW(...) ((void)0)
@@ -27,6 +31,9 @@ struct STS3215Servo {
   int32_t position_raw=0;
   uint32_t active_batch=0;
   bool calibrated=true;
+  bool gravity_return_to_zero=false;
+  int32_t target_raw=0;
+  struct Cover { void update_from_parent(float,float,int) {} } *cover=nullptr;
 };
 struct STS3215QueuedMove { uint8_t servo_id; int32_t target_raw; uint32_t batch=0; bool batch_started=false; };
 struct STS3215Component {
@@ -40,10 +47,16 @@ struct STS3215Component {
   uint8_t last_move_servo_id_=0;
   uint32_t last_move_started_=0, start_delay_ms_=2000;
   uint32_t next_batch_=0, enqueue_batch_=0, last_batch_started_=0;
+  int32_t position_tolerance_=5;
   std::vector<uint8_t> starts;
   bool calibrated_(const STS3215Servo &servo) { return servo.calibrated; }
-  void command_cover(uint8_t id, float) { move_queue_.push_back({id,100,enqueue_batch_}); }
-  void step_cover(uint8_t id, bool) { move_queue_.push_back({id,200,enqueue_batch_}); }
+  int32_t raw_for_cover_position_(const STS3215Servo &, float tilt) const { return std::lround(tilt*1000); }
+  float cover_position_for_raw_(const STS3215Servo &, int32_t raw) const { return raw/1000.0f; }
+  bool pending_target_(const STS3215Servo &, int32_t &) const;
+  void enqueue_move_(uint8_t,int32_t);
+  void enqueue_cover_sequence_(uint8_t,int32_t,int32_t);
+  void command_cover_from_(uint8_t,float,int32_t);
+  float cover_step_target_(const STS3215Servo &,int32_t,bool) const;
   void command_ripple_(float, bool, bool);
   void remove_queued_(uint8_t id) {
     move_queue_.erase(std::remove_if(move_queue_.begin(), move_queue_.end(),
@@ -64,6 +77,12 @@ struct STS3215Component {
   }
   void schedule();
 };
+int operation_for_target(float) { return 0; }
+float tilt_openness(float value) { return value; }
+float next_cover_quarter(float value, bool increase) {
+  return std::max(0.0f,std::min(1.0f,(increase ? std::floor(value*4)+1 : std::ceil(value*4)-1)/4));
+}
+COMMANDS
 RIPPLE
 void STS3215Component::schedule() {
 SCHEDULER
@@ -87,6 +106,9 @@ int main() {
   fifo.schedule(); now_ms=5000; fifo.schedule(); assert(fifo.starts.size()==1);
   fifo.servos_[0].command_active=false; fifo.schedule();
   assert(fifo.starts==std::vector<uint8_t>({1,1}));
+  now_ms=10000; fifo.schedule(); assert(fifo.starts.size()==2);
+  fifo.servos_[0].command_active=false; fifo.schedule();
+  assert(fifo.starts==std::vector<uint8_t>({1,1,2}));
   // No-op and missing servos do not consume start intervals.
   STS3215Component skip; skip.overlapping_=true; now_ms=0;
   skip.move_queue_={{99,100},{1,0},{2,100}};
@@ -139,6 +161,22 @@ int main() {
   partial.servos_[0].calibrated=false; partial.command_ripple_(0.5f,false,false);
   assert(partial.move_queue_.size()==2 && partial.move_queue_[0].servo_id==4);
   assert(partial.move_queue_[1].servo_id==5);
+  // Repeating a final tilt while the gravity leg runs preserves both legs.
+  STS3215Component repeat;
+  for (auto &servo : repeat.servos_) { servo.position_raw=750; servo.gravity_return_to_zero=true; }
+  repeat.command_ripple_(0.5f,false,false);
+  assert(repeat.move_queue_.size()==6);
+  const auto batch=repeat.move_queue_.front().batch;
+  repeat.command_ripple_(0.5f,false,false);
+  assert(repeat.move_queue_.size()==6 && repeat.move_queue_.front().batch==batch);
+  // Group quarter steps use final pending targets, before clearing their queue.
+  repeat.command_ripple_(0.0f,true,false);
+  for (const auto &move : repeat.move_queue_) assert(move.target_raw==0 || move.target_raw==250);
+  assert(repeat.move_queue_.size()==6);
+  // Replacing an in-flight gravity leg retains its final destination context.
+  repeat.servos_[0].command_active=true; repeat.servos_[0].target_raw=0;
+  repeat.command_ripple_(0.125f,false,false);
+  assert(repeat.move_queue_[0].target_raw==0 && repeat.move_queue_[1].target_raw==125);
   // Unsigned subtraction preserves the start delay across millis() rollover.
   STS3215Component wrap; wrap.overlapping_=true;
   wrap.move_queue_={{1,100},{1,200},{2,100}};
@@ -146,7 +184,7 @@ int main() {
   now_ms=999; wrap.schedule(); assert(wrap.starts.size()==1);
   now_ms=1000; wrap.schedule(); assert(wrap.starts.size()==2);
 }
-'''.replace("SCHEDULER", scheduler).replace("RIPPLE", ripple)
+'''.replace("SCHEDULER", scheduler).replace("RIPPLE", ripple).replace("COMMANDS", commands)
     with tempfile.TemporaryDirectory(prefix="sts3215-queue-test-") as directory:
         cpp = Path(directory) / "queue.cpp"
         exe = Path(directory) / "queue.exe"

@@ -9,6 +9,7 @@ from test_id_provisioning import ROOT, function
 
 def main():
     reader = function((ROOT / "components/sts3215/sts3215.cpp").read_text(), "read_status_packet_")
+    writer = function((ROOT / "components/sts3215/sts3215.cpp").read_text(), "write_register_")
     harness = r'''
 #include <cassert>
 #include <cstddef>
@@ -18,6 +19,12 @@ def main():
 #define ESP_LOGD(...) ((void)0)
 uint32_t millis() { return 100; }
 struct STS3215Component {
+  static constexpr uint8_t INST_WRITE=3;
+  size_t writes=0;
+  void clear_rx_() {}
+  void write_array(const uint8_t *,size_t) { ++writes; }
+  void flush() {}
+  bool write_register_(uint8_t,uint8_t,const uint8_t *,uint8_t);
   uint32_t response_timeout_ms_=50;
   bool uart_trace_=false;
   std::vector<uint8_t> stream;
@@ -37,7 +44,20 @@ struct STS3215Component {
   }
 };
 READER
+WRITER
 int main() {
+  {
+    STS3215Component c; uint8_t enabled=1;
+    c.packet(6,{}); c.packet(4,{});
+    assert(c.write_register_(6,40,&enabled,1));
+    assert(c.cursor==6 && c.writes==1); // ACK drained before the next TX.
+    assert(c.write_register_(4,40,&enabled,1));
+    assert(c.cursor==12 && c.writes==2);
+  }
+  {
+    STS3215Component c; uint8_t enabled=1;
+    assert(c.write_register_(5,40,&enabled,1)); // Read-only return level omits ACKs.
+  }
   for(uint8_t id: {0,1,42,253}) {
     STS3215Component c; c.packet(id,{}); uint8_t detected=99;
     assert(c.read_status_packet_(0xFE,nullptr,0,&detected) && detected==id);
@@ -64,7 +84,7 @@ int main() {
     assert(!c.read_status_packet_(2,&value,1) && value==99);
   }
 }
-'''.replace("READER", reader)
+'''.replace("READER", reader).replace("WRITER", writer)
     with tempfile.TemporaryDirectory(prefix="sts3215-reader-test-") as directory:
         cpp = Path(directory) / "reader.cpp"
         exe = Path(directory) / "reader.exe"

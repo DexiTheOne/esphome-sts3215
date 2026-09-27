@@ -234,8 +234,8 @@ void STS3215Component::loop() {
   }
   const auto move = *next;
   if (!overlapping_ && std::any_of(servos_.begin(), servos_.end(), [&move](const STS3215Servo &active) {
-        return active.command_active && active.active_batch != move.batch &&
-               (active.active_batch != 0 || move.batch != 0);
+        return active.command_active &&
+               (move.batch == 0 || active.active_batch != move.batch);
       }))
     return;
   auto *servo = find_servo_(move.servo_id);
@@ -255,7 +255,7 @@ void STS3215Component::loop() {
     update_group_cover_();
     return;
   }
-  if (move.target_raw == servo->position_raw) {
+  if (std::abs(move.target_raw - servo->position_raw) <= position_tolerance_) {
     move_queue_.erase(next);
     ESP_LOGD(TAG, "Servo %u skipped zero-distance move; %u queued move(s) remain",
              servo->id, static_cast<unsigned>(move_queue_.size()));
@@ -551,6 +551,11 @@ bool STS3215Component::write_register_(uint8_t servo_id, uint8_t address,
   log_uart_bytes_("TX write", packet.data(), packet.size());
   write_array(packet.data(), packet.size());
   flush();
+  // A status-return-level-2 servo replies to writes on this half-duplex
+  // bus. Wait for that packet before transmitting the next command, rather
+  // than colliding with its reply. Level-1 servos may omit the ACK; readback
+  // still confirms their settings, so an absent ACK is not a write failure.
+  read_status_packet_(servo_id, nullptr, 0);
   return true;
 }
 
@@ -1228,7 +1233,14 @@ void STS3215Component::command_cover(uint8_t servo_id, float position) {
   }
   position = std::max(0.0f, std::min(1.0f, position));
   int32_t previous_target;
-  pending_target_(*servo, previous_target);
+  const bool pending = pending_target_(*servo, previous_target);
+  if (pending && previous_target == raw_for_cover_position_(*servo, position)) return;
+  command_cover_from_(servo_id, position, previous_target);
+}
+
+void STS3215Component::command_cover_from_(uint8_t servo_id, float position, int32_t previous_target) {
+  auto *servo = find_servo_(servo_id);
+  if (servo == nullptr) return;
   const float previous_tilt = cover_position_for_raw_(*servo, previous_target);
   const int32_t target_raw = raw_for_cover_position_(*servo, position);
   ESP_LOGD(TAG, "Servo %u cover command %.0f%%: current raw %ld, target raw %ld, previous tilt %.0f%%",
@@ -1249,8 +1261,25 @@ void STS3215Component::command_cover(uint8_t servo_id, float position) {
 }
 
 void STS3215Component::command_ripple_(float position, bool stepping, bool increase) {
-  // A replacement group command rebuilds pair order, even if an earlier
-  // request has already consumed some of its outer moves.
+  // Snapshot every final target before rebuilding the queue. Gravity return
+  // and repeated quarter-step commands must use the planned position, not
+  // whichever intermediate step happens to be active when the request arrives.
+  std::vector<int32_t> previous_targets;
+  std::vector<float> targets;
+  bool changed = false;
+  for (auto &servo : servos_) {
+    int32_t previous;
+    const bool pending = pending_target_(servo, previous);
+    const float target = stepping ? cover_step_target_(servo, previous, increase)
+                                  : std::max(0.0f, std::min(1.0f, position));
+    previous_targets.push_back(previous);
+    targets.push_back(target);
+    if (calibrated_(servo)) {
+      const int32_t raw = raw_for_cover_position_(servo, target);
+      changed |= pending ? raw != previous : std::abs(raw - previous) > position_tolerance_;
+    }
+  }
+  if (!changed) return;  // Repeated group tilt commands preserve both gravity legs.
   for (auto &servo : servos_)
     if (calibrated_(servo)) remove_queued_(servo.id);
   for (size_t outer = 0; outer < (servos_.size() + 1) / 2; outer++) {
@@ -1260,8 +1289,7 @@ void STS3215Component::command_ripple_(float position, bool stepping, bool incre
     for (const size_t index : {outer, inner}) {
       auto &servo = servos_[index];
       if (calibrated_(servo)) {
-        if (stepping) step_cover(servo.id, increase);
-        else command_cover(servo.id, position);
+        command_cover_from_(servo.id, targets[index], previous_targets[index]);
       }
       if (outer == inner) break;  // An odd-sized list has a single center blind.
     }
@@ -1290,11 +1318,15 @@ void STS3215Component::step_cover(uint8_t servo_id, bool increase) {
   }
   int32_t planned_target;
   pending_target_(*servo, planned_target);
+  command_cover(servo_id, cover_step_target_(*servo, planned_target, increase));
+}
+
+float STS3215Component::cover_step_target_(const STS3215Servo &servo, int32_t planned_target, bool increase) const {
   float target_tilt = 0.0f;
   bool target_set = false;
   for (int quarter = 0; quarter <= 4; quarter++) {
     const float tilt = static_cast<float>(quarter) / 4.0f;
-    if (planned_target == raw_for_cover_position_(*servo, tilt)) {
+    if (planned_target == raw_for_cover_position_(servo, tilt)) {
       const int next_quarter = std::max(0, std::min(4, quarter + (increase ? 1 : -1)));
       target_tilt = static_cast<float>(next_quarter) / 4.0f;
       target_set = true;
@@ -1302,8 +1334,8 @@ void STS3215Component::step_cover(uint8_t servo_id, bool increase) {
     }
   }
   if (!target_set)
-    target_tilt = next_cover_quarter(cover_position_for_raw_(*servo, planned_target), increase);
-  command_cover(servo_id, target_tilt);
+    target_tilt = next_cover_quarter(cover_position_for_raw_(servo, planned_target), increase);
+  return target_tilt;
 }
 
 void STS3215Component::step_all_covers(bool increase) {
