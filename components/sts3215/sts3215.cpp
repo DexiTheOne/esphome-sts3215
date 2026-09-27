@@ -46,6 +46,9 @@ void STS3215Component::setup() {
   for (auto &servo : servos_) {
     servo.preference = global_preferences->make_preference<STS3215PreferenceData>(servo.preference_key);
     load_preferences_(servo);
+    servo.endpoint_preference = global_preferences->make_preference<int8_t>(servo.preference_key ^ 0xEC321500);
+    servo.endpoint_preference.load(&servo.reported_endpoint);
+    if (servo.reported_endpoint < -1 || servo.reported_endpoint > 1) servo.reported_endpoint = -1;
     // Keep this separate from the existing position/calibration preference layout.
     servo.direction_preference = global_preferences->make_preference<bool>(servo.preference_key ^ 0xAC321500);
     servo.direction_preference.load(&servo.negative_is_down);
@@ -265,7 +268,9 @@ void STS3215Component::loop() {
     update_group_cover_();
     return;
   }
-  if (std::abs(move.target_raw - servo->position_raw) <= position_tolerance_) {
+  if (std::abs(move.target_raw - servo->position_raw) <= position_tolerance_ &&
+      !(calibrated_(*servo) && (move.target_raw == servo->calibration_down ||
+                               move.target_raw == servo->calibration_up))) {
     move_queue_.erase(next);
     ESP_LOGD(TAG, "Servo %u skipped zero-distance move; %u queued move(s) remain",
              servo->id, static_cast<unsigned>(move_queue_.size()));
@@ -634,7 +639,7 @@ void STS3215Component::poll_servo_(STS3215Servo &servo) {
       ESP_LOGW(TAG, "Servo %u did not begin moving within 5 s; clearing queued moves", servo.id);
       remove_queued_(servo.id);
       finish_move_(servo, true);
-    } else if ((elapsed >= 250 && arrived && (!servo.overextend || !servo.moving)) || stopped_after_motion || elapsed >= move_timeout_ms_)
+    } else if ((elapsed >= 250 && arrived && (!calibrated_(servo) || !servo.moving)) || stopped_after_motion || elapsed >= move_timeout_ms_)
       finish_move_(servo, elapsed >= move_timeout_ms_ && !arrived);
   }
   update_cover_(servo);
@@ -648,6 +653,10 @@ void STS3215Component::begin_move_(STS3215Servo &servo, int32_t target_raw) {
     move_delta = std::max<int32_t>(-32767, std::min<int32_t>(32767, move_delta));
     target_raw = servo.position_raw + move_delta;
     ESP_LOGW(TAG, "Servo %u move was clamped to the Mode 3 single-command step range", servo.id);
+  }
+  if (servo.overextend_state == 0) {
+    servo.reported_endpoint = -1;
+    servo.endpoint_preference.save(&servo.reported_endpoint);
   }
   servo.move_start_raw = servo.position_raw;
   servo.target_raw = target_raw;
@@ -675,7 +684,7 @@ void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
   // Tug only a final calibrated endpoint, never an intermediate gravity leg.
   const bool final_leg = std::none_of(move_queue_.begin(), move_queue_.end(),
       [&servo](const STS3215QueuedMove &move) { return move.servo_id == servo.id; });
-  if (!timed_out && servo.overextend && servo.overextend_state == 0 && final_leg &&
+  if (!timed_out && servo.overextend_state == 0 &&
       calibrated_(servo) &&
       (servo.target_raw == servo.calibration_down || servo.target_raw == servo.calibration_up)) {
     int32_t encoder;
@@ -686,6 +695,13 @@ void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
       servo.overextend_encoder = encoder;
       servo.overextend_start = servo.position_raw;
       servo.overextend_state = 1;
+      if (!servo.overextend || !final_leg) {
+        servo.overextend_state = 2;
+        servo.overextend_released = millis();
+        servo.moving_seen = false;
+        if (servo.torque_sensor != nullptr) servo.torque_sensor->publish_state(false);
+        return;  // Endpoint tracking is default, including intermediate gravity legs.
+      }
       const uint16_t limit = std::min<uint16_t>(servo.torque_limit_raw, 250);
       const uint8_t torque[] = {static_cast<uint8_t>(limit), static_cast<uint8_t>(limit >> 8)};
       write_register_(servo.id, REG_TORQUE_LIMIT, torque, 2);
@@ -699,7 +715,7 @@ void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
       }
       timed_out = true;
     } else {
-      ESP_LOGW(TAG, "Servo %u overextend skipped: physical encoder unavailable", servo.id);
+      ESP_LOGW(TAG, "Servo %u endpoint tracking skipped: physical encoder unavailable", servo.id);
     }
   }
   const uint8_t disabled = 0;
@@ -736,6 +752,8 @@ void STS3215Component::process_overextend_(STS3215Servo &servo) {
     ESP_LOGI(TAG, "Servo %u overextend settled: endpoint=%ld actual=%ld offset=%ld", servo.id,
              static_cast<long>(servo.overextend_endpoint), static_cast<long>(servo.position_raw),
              static_cast<long>(servo.position_raw - servo.overextend_endpoint));
+    servo.reported_endpoint = servo.overextend_endpoint == servo.calibration_down ? 0 : 1;
+    servo.endpoint_preference.save(&servo.reported_endpoint);
     servo.target_raw = servo.position_raw;
   } else {
     servo.mode_ready = false;
@@ -1435,6 +1453,8 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     servo->calibration_middle = 0;
     servo->calibration_up = 0;
     servo->calibration_mask = 0;
+    servo->reported_endpoint = -1;
+    servo->endpoint_preference.save(&servo->reported_endpoint);
     servo->calibration_unlocked = true;
     servo->calibration_error = false;
     servo->saved_position = 0;
@@ -1825,12 +1845,12 @@ void STS3215Component::update_cover_(STS3215Servo &servo) {
   const bool pending = pending_target_(servo, pending_target);
   cover::CoverOperation operation = cover::COVER_OPERATION_IDLE;
   const float current_tilt = cover_position_for_raw_(servo, servo.position_raw);
-  float reported_tilt = current_tilt;
+  float reported_tilt = !pending && servo.reported_endpoint >= 0 ? servo.reported_endpoint : current_tilt;
   if (pending) {
     reported_tilt = cover_position_for_raw_(servo, pending_target);
     operation = operation_for_target(reported_tilt);
   }
-  servo.cover->update_from_parent(reported_tilt, tilt_openness(current_tilt), operation);
+  servo.cover->update_from_parent(reported_tilt, tilt_openness(!pending && servo.reported_endpoint >= 0 ? reported_tilt : current_tilt), operation);
 }
 
 void STS3215Component::update_group_cover_() {
@@ -1846,8 +1866,9 @@ void STS3215Component::update_group_cover_() {
     int32_t target;
     const bool pending = pending_target_(servo, target);
     if (pending) reported_tilt = cover_position_for_raw_(servo, target);
+    else if (servo.reported_endpoint >= 0) reported_tilt = servo.reported_endpoint;
     tilt_sum += reported_tilt;
-    openness_sum += tilt_openness(current_tilt);
+    openness_sum += tilt_openness(!pending && servo.reported_endpoint >= 0 ? reported_tilt : current_tilt);
     count++;
     if (pending) {
       const float target_tilt = cover_position_for_raw_(servo, target);

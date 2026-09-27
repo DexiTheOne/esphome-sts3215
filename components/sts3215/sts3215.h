@@ -200,6 +200,8 @@ struct STS3215Servo {
   bool moving{false};
   bool moving_seen{false};
   bool command_active{false};
+  int8_t reported_endpoint{-1};  // -1: measured tilt; 0/1: completed requested endpoint
+  ESPPreferenceObject endpoint_preference;
   bool overextend{false};
   bool overextend_failed{false};
   uint8_t overextend_state{0};  // 1: tug, 2: torque-free settling

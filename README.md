@@ -505,6 +505,12 @@ cover target outward by another 20 degrees. The tug caps torque at 25% of full
 power (or the configured torque limit if lower). Intermediate gravity-return
 legs do not tug. The option defaults to false.
 
+Endpoint encoder tracking is always enabled, even with `overextend: false`
+and during intermediate gravity-return endpoints. Home Assistant reports the
+completed requested endpoint as exactly 0% or 100% (fully closed), while raw
+encoder telemetry and the next move use the measured physical position. The
+endpoint display is retained across reboots and cleared when a new move starts.
+
 After releasing torque, the component keeps motor power on for at least one
 second, even with a shorter `power_off_delay`. It reads the settled physical
 encoder using EEPROM-locked RAM mode changes, restores Mode 3 and the normal

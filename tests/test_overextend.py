@@ -6,7 +6,7 @@ from test_id_provisioning import ROOT, function
 
 def main():
     source = (ROOT / "components/sts3215/sts3215.cpp").read_text()
-    runtime = "\n".join(function(source, name) for name in ("finish_move_", "process_overextend_"))
+    runtime = "\n".join(function(source, name) for name in ("finish_move_", "process_overextend_", "update_cover_", "update_group_cover_"))
     harness = r'''
 #include <algorithm>
 #include <cassert>
@@ -19,8 +19,15 @@ def main():
 #define ESP_LOGE(...) ((void)0)
 uint32_t clock_ms=0;
 uint32_t millis() { return clock_ms; }
+namespace cover { enum CoverOperation { COVER_OPERATION_IDLE, COVER_OPERATION_OPENING, COVER_OPERATION_CLOSING }; }
+float tilt_openness(float t) {return 1.0f-std::abs(t*2-1);}
+cover::CoverOperation operation_for_target(float t) {return t<=0 || t>=1 ? cover::COVER_OPERATION_CLOSING : cover::COVER_OPERATION_OPENING;}
+struct Cover { float tilt=0,position=0; void update_from_parent(float t,float p,cover::CoverOperation) {tilt=t;position=p;} };
 struct Sensor { void publish_state(bool) {} };
+struct Pref { void save(int8_t *) {} };
 struct STS3215Servo {
+ Cover *cover=nullptr;
+ int8_t reported_endpoint=-1; Pref endpoint_preference;
  uint8_t id=6, overextend_state=0;
  bool overextend_failed=false, overextend=true, command_active=true, moving_seen=true, moving=false, has_position=true, mode_ready=true;
  int32_t position_raw=1000, target_raw=1000, calibration_down=0, calibration_middle=500, calibration_up=1000;
@@ -31,6 +38,8 @@ struct STS3215Servo {
 };
 struct STS3215QueuedMove { uint8_t servo_id; };
 struct STS3215Component {
+ std::vector<STS3215Servo> servos_;
+ Cover *group_cover_=nullptr;
  std::vector<STS3215QueuedMove> move_queue_;
  int position_tolerance_=5, encoder=4000, limit=400, begins=0, saves=0;
  bool encoder_ok=true;
@@ -38,11 +47,14 @@ struct STS3215Component {
  void write_register_(uint8_t,int reg,const uint8_t *data,int size) { if(reg==48 && size==2) limit=data[0]+256*data[1]; }
  bool read_register_(uint8_t,int,uint8_t *data,int) { data[0]=limit;data[1]=limit>>8;return true; }
  int decode_u16_(uint8_t *data) { return data[0]+256*data[1]; }
- bool calibrated_(STS3215Servo &) { return true; }
+ bool calibrated_(const STS3215Servo &) { return true; }
  bool read_auto_encoder_(STS3215Servo &,int32_t &value) {value=encoder;return encoder_ok;}
  void begin_move_(STS3215Servo &s,int32_t target) { ++begins;s.target_raw=target;s.command_active=true; }
  void remove_queued_(uint8_t) {move_queue_.clear();}
- void update_cover_(STS3215Servo &) {}
+ float cover_position_for_raw_(const STS3215Servo &,int32_t raw) {return std::max(0.0f,std::min(1.0f,raw/1000.0f));}
+ bool pending_target_(const STS3215Servo &s,int32_t &target) {target=s.overextend_state ? s.overextend_endpoint : s.target_raw;return s.command_active;}
+ void update_cover_(STS3215Servo &);
+ void update_group_cover_();
  void save_preferences_(STS3215Servo &) {++saves;}
  void finish_move_(STS3215Servo &,bool);
  void process_overextend_(STS3215Servo &);
@@ -60,13 +72,23 @@ int main() {
  s=STS3215Servo{};s.position_raw=s.target_raw=0;c.encoder=100;
  c.finish_move_(s,false);assert(s.target_raw==-228);
  s.position_raw=-228;c.finish_move_(s,false);clock_ms=2000;c.encoder=4090;c.process_overextend_(s);
- assert(s.position_raw==-106);
+ assert(s.position_raw==-106 && s.reported_endpoint==0);
+ s=STS3215Servo{};s.overextend=false;s.position_raw=992;c.encoder=100;int no_tug=c.begins;
+ c.finish_move_(s,false);assert(c.begins==no_tug && s.command_active && s.overextend_state==2);
+ clock_ms=3000;c.encoder=80;c.process_overextend_(s);
+ assert(s.position_raw==972 && s.reported_endpoint==1 && !s.command_active);
  s=STS3215Servo{};s.position_raw=992;c.finish_move_(s,false);assert(s.overextend_start==992 && s.target_raw==1220);
  s=STS3215Servo{};c.move_queue_.push_back({6});int starts=c.begins;c.finish_move_(s,false);
- assert(c.begins==starts && !s.command_active);
+ assert(c.begins==starts && s.command_active && s.overextend_state==2);
  c.move_queue_.clear();s=STS3215Servo{};c.finish_move_(s,true);assert(c.begins==starts);
- s=STS3215Servo{};c.finish_move_(s,false);c.finish_move_(s,true);clock_ms=3000;c.encoder_ok=false;c.process_overextend_(s);
+ s=STS3215Servo{};c.finish_move_(s,false);c.finish_move_(s,true);clock_ms=4000;c.encoder_ok=false;c.process_overextend_(s);
  assert(!s.mode_ready && !s.command_active && c.limit==400);
+ Cover individual,group;s=STS3215Servo{};s.cover=&individual;s.command_active=false;s.position_raw=920;s.reported_endpoint=1;
+ c.update_cover_(s);assert(individual.tilt==1 && individual.position==0 && s.position_raw==920);
+ s.position_raw=70;s.reported_endpoint=0;c.update_cover_(s);assert(individual.tilt==0 && individual.position==0);
+ c.servos_={s};c.group_cover_=&group;c.update_group_cover_();assert(group.tilt==0 && group.position==0);
+ s.reported_endpoint=-1;s.position_raw=500;c.update_cover_(s);assert(individual.tilt==0.5f && individual.position==1);
+
 }
 '''.replace("RUNTIME",runtime)
     with tempfile.TemporaryDirectory() as directory:

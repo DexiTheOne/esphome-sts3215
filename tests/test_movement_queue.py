@@ -28,7 +28,7 @@ uint32_t millis() { return now_ms; }
 struct STS3215Servo {
   uint8_t id;
   bool command_active=false, mode_ready=true, overextend_failed=false;
-  int32_t position_raw=0;
+  int32_t position_raw=0, calibration_down=0, calibration_up=1000;
   uint32_t active_batch=0;
   bool calibrated=true;
   bool gravity_return_to_zero=false;
