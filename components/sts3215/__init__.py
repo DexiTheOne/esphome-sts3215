@@ -60,6 +60,10 @@ CONF_POWER_PIN = "power_pin"
 CONF_POWER_ON_DELAY = "power_on_delay"
 CONF_POWER_OFF_DELAY = "power_off_delay"
 CONF_UART_TRACE = "uart_trace"
+CONF_PROVISIONING = "provisioning"
+CONF_CURRENT_ID = "current_id"
+CONF_NEW_ID = "new_id"
+CONF_SET_ID = "set_id"
 
 sts3215_ns = cg.esphome_ns.namespace("sts3215")
 STS3215Component = sts3215_ns.class_("STS3215Component", cg.PollingComponent, uart.UARTDevice)
@@ -73,9 +77,18 @@ STS3215GroupCover = sts3215_ns.class_("STS3215GroupCover", cover.Cover)
 STS3215CalibrationButton = sts3215_ns.class_("STS3215CalibrationButton", button.Button)
 STS3215PresetButton = sts3215_ns.class_("STS3215PresetButton", button.Button)
 STS3215StepAction = sts3215_ns.class_("STS3215StepAction", automation.Action)
+STS3215SetIDAction = sts3215_ns.class_("STS3215SetIDAction", automation.Action)
+STS3215IDNumber = sts3215_ns.class_("STS3215IDNumber", number.Number)
+STS3215SetIDButton = sts3215_ns.class_("STS3215SetIDButton", button.Button)
 
 
 def _unique_servo_ids(config):
+    if not config[CONF_SERVOS] and CONF_PROVISIONING not in config:
+        raise cv.Invalid("Configure servos or a provisioning panel")
+    if config[CONF_SERVOS] and CONF_PROVISIONING in config:
+        raise cv.Invalid("Use a separate provisioning configuration without servos")
+    if not config[CONF_SERVOS] and CONF_MAIN_COVER in config:
+        raise cv.Invalid("main_cover requires configured servos")
     seen = set()
     for servo_config in config[CONF_SERVOS]:
         servo_id = servo_config[CONF_SERVO_ID]
@@ -166,10 +179,22 @@ SERVO_SCHEMA = cv.Schema({
     cv.Optional(CONF_PRESETS): cv.ensure_list(PRESET_SCHEMA),
 })
 
+PROVISIONING_SCHEMA = cv.Schema({
+    cv.Required(CONF_CURRENT_ID): number.number_schema(
+        STS3215IDNumber, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:identifier"),
+    cv.Required(CONF_NEW_ID): number.number_schema(
+        STS3215IDNumber, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:identifier"),
+    cv.Required(CONF_SET_ID): button.button_schema(
+        STS3215SetIDButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:content-save"),
+    cv.Optional(CONF_STATUS): text_sensor.text_sensor_schema(
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC),
+})
+
 CONFIG_SCHEMA = cv.All(
     cv.Schema({
         cv.GenerateID(): cv.declare_id(STS3215Component),
-        cv.Required(CONF_SERVOS): cv.All(cv.ensure_list(SERVO_SCHEMA), cv.Length(min=1)),
+        cv.Optional(CONF_SERVOS, default=[]): cv.ensure_list(SERVO_SCHEMA),
+        cv.Optional(CONF_PROVISIONING): PROVISIONING_SCHEMA,
         cv.Optional(CONF_MAIN_COVER): cover.cover_schema(STS3215GroupCover, device_class="blind"),
         cv.Optional(CONF_START_DELAY, default="2s"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_MOVE_TIMEOUT, default="2min"): cv.positive_time_period_milliseconds,
@@ -207,6 +232,18 @@ async def to_code(config):
     if CONF_POWER_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_POWER_PIN])
         cg.add(var.set_power_pin(pin))
+
+    if panel := config.get(CONF_PROVISIONING):
+        for key, destination, initial in [(CONF_CURRENT_ID, False, 1), (CONF_NEW_ID, True, 2)]:
+            selector = await number.new_number(panel[key], min_value=0, max_value=253, step=1)
+            cg.add(selector.set_parent(var))
+            cg.add(selector.set_destination(destination))
+            cg.add(selector.publish_state(initial))
+        btn = await button.new_button(panel[CONF_SET_ID])
+        cg.add(btn.set_parent(var))
+        if CONF_STATUS in panel:
+            status = await text_sensor.new_text_sensor(panel[CONF_STATUS])
+            cg.add(var.set_id_status_sensor(status))
 
     component_key = zlib.crc32(str(config[CONF_ID]).encode("utf-8")) & 0xFFFFFFFF
     for servo_config in config[CONF_SERVOS]:
@@ -302,4 +339,21 @@ async def sts3215_step_to_code(config, action_id, template_arg, args):
     degrees = await cg.templatable(config[CONF_DEGREES], args, cg.float_)
     cg.add(var.set_servo_id(servo_id))
     cg.add(var.set_degrees(degrees))
+    return var
+
+
+SET_ID_ACTION_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.use_id(STS3215Component),
+    cv.Required(CONF_CURRENT_ID): cv.templatable(cv.int_range(min=0, max=253)),
+    cv.Required(CONF_NEW_ID): cv.templatable(cv.int_range(min=0, max=253)),
+})
+
+
+@automation.register_action("sts3215.set_id", STS3215SetIDAction, SET_ID_ACTION_SCHEMA, synchronous=True)
+async def sts3215_set_id_to_code(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg)
+    await cg.register_parented(var, config[CONF_ID])
+    for key in (CONF_CURRENT_ID, CONF_NEW_ID):
+        value = await cg.templatable(config[key], args, cg.int32)
+        cg.add(getattr(var, f"set_{key}")(value))
     return var

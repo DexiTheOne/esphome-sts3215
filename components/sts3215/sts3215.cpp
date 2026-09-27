@@ -35,6 +35,7 @@ static float next_cover_quarter(float tilt, bool increase) {
 
 void STS3215Component::setup() {
   ESP_LOGCONFIG(TAG, "Setting up STS3215 bus with %u servo(s)...", static_cast<unsigned>(servos_.size()));
+  if (servos_.empty()) publish_id_status_("Ready: connect one servo and select its current and new IDs");
   if (power_pin_ != nullptr) {
     power_pin_->setup();
     power_pin_->digital_write(false);
@@ -153,7 +154,7 @@ void STS3215Component::initialize_powered_bus_() {
 void STS3215Component::loop() {
   if (power_pin_ != nullptr) {
     if (!power_on_ && (!move_queue_.empty() || !calibration_queue_.empty() ||
-                       commission_state_ != COMMISSION_IDLE))
+                       commission_state_ != COMMISSION_IDLE || id_change_state_ != ID_IDLE))
       set_bus_power_(true);
     if (power_on_ && !power_ready_) {
       if (static_cast<uint32_t>(millis() - power_on_at_) < power_on_delay_ms_) return;
@@ -162,7 +163,7 @@ void STS3215Component::loop() {
     bool active = false;
     for (const auto &servo : servos_) active |= servo.command_active;
     const bool idle = move_queue_.empty() && calibration_queue_.empty() && pending_commission_ids_.empty() &&
-                      commission_state_ == COMMISSION_IDLE && !active;
+                      commission_state_ == COMMISSION_IDLE && id_change_state_ == ID_IDLE && !active;
     if (power_on_ && idle) {
       if (!idle_timer_active_) {
         idle_since_ = millis();
@@ -174,6 +175,10 @@ void STS3215Component::loop() {
     } else {
       idle_timer_active_ = false;
     }
+  }
+  if (id_change_state_ != ID_IDLE) {
+    process_id_change_();
+    return;
   }
   if (!calibration_queue_.empty()) {
     const auto action = calibration_queue_.front();
@@ -725,6 +730,129 @@ bool STS3215Component::set_jog_increment(uint8_t servo_id, float value) {
   return true;
 }
 
+void STS3215Component::publish_id_status_(const char *status) {
+  ESP_LOGI(TAG, "Servo ID provisioning: %s", status);
+  if (id_status_sensor_ != nullptr) id_status_sensor_->publish_state(status);
+}
+
+void STS3215Component::set_servo_id(int32_t current_id, int32_t new_id) {
+  if (current_id < 0 || current_id > 253 || new_id < 0 || new_id > 253) {
+    publish_id_status_("Rejected: IDs must be integers from 0 to 253");
+    return;
+  }
+  if (!servos_.empty()) {
+    publish_id_status_("Rejected: use provisioning firmware without configured servos");
+    return;
+  }
+  if (id_change_state_ != ID_IDLE) {
+    ESP_LOGW(TAG, "Servo ID provisioning is already in progress; request ignored");
+    return;
+  }
+  provisioning_current_id_ = static_cast<uint8_t>(current_id);
+  provisioning_new_id_ = static_cast<uint8_t>(new_id);
+  id_unlock_attempted_ = false;
+  id_write_attempted_ = false;
+  id_change_state_ = ID_WAIT_POWER;
+  id_change_next_ms_ = millis();
+  publish_id_status_("Provisioning: checking connected servo");
+}
+
+void STS3215Component::fail_id_change_(const char *reason) {
+  // A write can take effect even when its response is lost. Relock both
+  // possible addresses after an uncertain ID write, never broadcast.
+  if (id_unlock_attempted_) {
+    const uint8_t locked = 1;
+    if (id_write_attempted_)
+      write_register_(provisioning_new_id_, REG_EEPROM_LOCK, &locked, 1);
+    write_register_(provisioning_current_id_, REG_EEPROM_LOCK, &locked, 1);
+  }
+  ESP_LOGE(TAG, "Servo ID %u -> %u failed: %s", provisioning_current_id_, provisioning_new_id_, reason);
+  publish_id_status_(reason);
+  id_change_state_ = ID_IDLE;
+}
+
+void STS3215Component::process_id_change_() {
+  if (id_change_state_ == ID_IDLE || static_cast<int32_t>(millis() - id_change_next_ms_) < 0) return;
+  const uint8_t source = provisioning_current_id_;
+  const uint8_t target = provisioning_new_id_;
+  uint8_t value;
+  switch (id_change_state_) {
+    case ID_WAIT_POWER:
+      if (power_pin_ != nullptr && !power_ready_) return;
+      id_change_state_ = ID_CHECK;
+      break;
+    case ID_CHECK:
+      if (!read_register_(source, REG_ID, &value, 1) || value != source) {
+        fail_id_change_("Failed: current ID did not respond correctly; no EEPROM write");
+        return;
+      }
+      if (source == target) {
+        publish_id_status_("Verified: current and new IDs match; EEPROM unchanged");
+        id_change_state_ = ID_IDLE;
+        return;
+      }
+      if (read_register_(target, REG_ID, &value, 1)) {
+        fail_id_change_("Rejected: new ID is already in use; no EEPROM write");
+        return;
+      }
+      if (!read_register_(source, REG_MOVING, &value, 1) || value != 0) {
+        fail_id_change_("Rejected: servo must be stationary and readable; no EEPROM write");
+        return;
+      }
+      value = 0;
+      write_register_(source, REG_TORQUE_ENABLE, &value, 1);
+      id_change_state_ = ID_TORQUE_OFF;
+      break;
+    case ID_TORQUE_OFF:
+      if (!read_register_(source, REG_TORQUE_ENABLE, &value, 1) || value != 0) {
+        fail_id_change_("Failed: torque-off verification failed; no EEPROM write");
+        return;
+      }
+      value = 0;
+      id_unlock_attempted_ = true;
+      write_register_(source, REG_EEPROM_LOCK, &value, 1);
+      id_change_state_ = ID_UNLOCK;
+      break;
+    case ID_UNLOCK:
+      if (!read_register_(source, REG_EEPROM_LOCK, &value, 1) || value != 0) {
+        fail_id_change_("Failed: EEPROM unlock could not be verified; relock attempted");
+        return;
+      }
+      id_write_attempted_ = true;
+      write_register_(source, REG_ID, &target, 1);
+      id_change_state_ = ID_WRITE;
+      break;
+    case ID_WRITE:
+      if (!read_register_(target, REG_ID, &value, 1) || value != target) {
+        fail_id_change_("Failed: ID write unverified; relock attempted at both IDs; check current/new ID");
+        return;
+      }
+      value = 1;
+      write_register_(target, REG_EEPROM_LOCK, &value, 1);
+      id_change_state_ = ID_RELOCK;
+      break;
+    case ID_RELOCK:
+      if (!read_register_(target, REG_EEPROM_LOCK, &value, 1) || value != 1) {
+        fail_id_change_("Failed: new ID responds but EEPROM lock unverified; relock attempted");
+        return;
+      }
+      id_change_state_ = ID_VERIFY;
+      break;
+    case ID_VERIFY:
+      if (!read_register_(target, REG_ID, &value, 1) || value != target) {
+        fail_id_change_("Failed: final ID verification failed; check current/new ID");
+        return;
+      }
+      ESP_LOGI(TAG, "Servo ID changed from %u to %u; EEPROM relocked, torque remains off", source, target);
+      publish_id_status_("Success: new ID verified and EEPROM locked; torque off");
+      id_change_state_ = ID_IDLE;
+      return;
+    case ID_IDLE:
+      return;
+  }
+  id_change_next_ms_ = millis() + 20;
+}
+
 void STS3215Component::commission_step_mode(uint8_t servo_id) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
@@ -752,7 +880,7 @@ void STS3215Component::process_commissioning_() {
 
   // A successful configuration read must confirm a mismatch before EEPROM writes.
   switch (commission_state_) {
-    case COMMISSION_CHECK:
+    case COMMISSION_CHECK: {
       bool config_read;
       if (update_commission_state_(*servo, true, &config_read)) {
         ESP_LOGW(TAG, "Servo %u is already fully commissioned; EEPROM was not written", servo->id);
@@ -765,6 +893,7 @@ void STS3215Component::process_commissioning_() {
         commission_next_ms_ = millis();
       }
       break;
+    }
 
     case COMMISSION_PREPARE: {
       if (!read_register_(servo->id, REG_PHASE, &commissioning_phase_, 1)) {
@@ -1144,12 +1273,12 @@ int32_t STS3215Component::raw_for_cover_position_(const STS3215Servo &servo, flo
 }
 
 float STS3215Component::cover_position_for_raw_(const STS3215Servo &servo, int32_t raw) const {
-  const int32_t first = servo.calibration_middle - servo.calibration_down;
-  const int32_t second = servo.calibration_up - servo.calibration_middle;
   // Arrival allows a small encoder error. HA requires exactly zero openness
   // for Closed, so use the same tolerance at both closed endpoints.
   if (std::abs(raw - servo.calibration_down) <= position_tolerance_) return 0.0f;
   if (std::abs(raw - servo.calibration_up) <= position_tolerance_) return 1.0f;
+  const int32_t first = servo.calibration_middle - servo.calibration_down;
+  const int32_t second = servo.calibration_up - servo.calibration_middle;
   if (first == 0 || second == 0) return 0.0f;
   const bool before_middle = first > 0 ? raw <= servo.calibration_middle : raw >= servo.calibration_middle;
   float result;
@@ -1254,6 +1383,16 @@ void STS3215GroupCover::update_from_parent(float tilt_value, float openness,
 
 void STS3215CalibrationButton::press_action() {
   if (parent_ != nullptr) parent_->calibration_action(servo_id_, action_);
+}
+
+void STS3215IDNumber::control(float value) {
+  if (parent_ == nullptr || !std::isfinite(value) || value < 0 || value > 253 || value != std::floor(value)) return;
+  parent_->set_selected_id(destination_, static_cast<uint8_t>(value));
+  publish_state(value);
+}
+
+void STS3215SetIDButton::press_action() {
+  if (parent_ != nullptr) parent_->provision_selected_id();
 }
 
 void STS3215PresetButton::press_action() {

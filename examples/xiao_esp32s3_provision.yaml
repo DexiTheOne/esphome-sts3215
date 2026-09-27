@@ -1,0 +1,54 @@
+# Temporary provisioning firmware: connect only ONE servo to the powered bus.
+# Select its current ID and desired new ID in Home Assistant, then press Set ID.
+# After provisioning all motors, flash the normal blind YAML with their new IDs.
+esphome:
+  name: sts3215-blind-demo
+  friendly_name: STS3215 Servo Provisioning
+
+esp32:
+  board: seeed_xiao_esp32s3
+  framework:
+    type: esp-idf
+
+logger:
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source: github://DexiTheOne/esphome-sts3215@main
+    refresh: always
+    components: [sts3215]
+
+uart:
+  id: servo_uart
+  tx_pin: GPIO43
+  rx_pin: GPIO44
+  baud_rate: 1000000
+  data_bits: 8
+  parity: NONE
+  stop_bits: 1
+
+sts3215:
+  id: servo_bus
+  uart_id: servo_uart
+  power_pin: GPIO1
+  power_on_delay: 1s
+  provisioning:
+    current_id:
+      name: Current Servo ID
+      mode: box
+    new_id:
+      name: New Servo ID
+      mode: box
+    set_id:
+      name: Set Servo ID
+    status:
+      name: Servo ID Provisioning Status

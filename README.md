@@ -191,6 +191,55 @@ reads all four settings back. **Multi-Turn Mode Active** becomes ON only when
 the mode, Phase bit, and both limits verify correctly. Pressing the button again
 after that is a read-only no-op, which avoids repeated EEPROM wear.
 
+## Assigning servo IDs
+
+Use [`examples/xiao_esp32s3_provision.yaml`](examples/xiao_esp32s3_provision.yaml)
+as temporary provisioning firmware. Connect **only one servo** to the bus,
+then set **Current Servo ID** (initially 1) and **New Servo ID** (initially 2)
+in Home Assistant and press **Set Servo ID**. Valid IDs are 0–253. Changing
+either selector alone does not write the motor. **Servo ID Provisioning Status**
+shows the outcome, and ESPHome logs include the old and new IDs.
+
+The explicit button/action checks the source ID, rejects a responding motor
+at the new ID, checks that the motor is stationary, disables and verifies
+torque, unlocks EEPROM, writes ID register 5, then relocks and verifies at the
+new ID. Torque stays off. An already matching ID is a read-only no-op.
+Failed verification reports failure and attempts to relock any address at
+which the motor might now respond; it does not automatically retry the ID
+write. If the outcome is uncertain, check both the old and new IDs using the
+same-ID no-op before trying another change.
+
+Disconnect power before swapping motors and repeat for each motor. Motors
+sharing an ID cannot be distinguished by the protocol: the destination check
+cannot detect multiple motors sharing the source ID. A silent or unpowered
+motor also cannot be detected. Isolating one motor is required for provisioning.
+The assigned ID persists in the servo's EEPROM across power cycles.
+
+After provisioning, set each motor's `servo_id` in the normal blind YAML and
+flash that firmware again. Provisioning firmware does not load, change, or
+erase blind calibration. It has no `servos:` entries and cannot be combined
+with normal servo controls in the same component.
+Calibration is stored per servo ID. If you change an already calibrated
+motor's ID, calibrate it under the new ID before using its blind cover.
+
+The same operation is available as an ESPHome automation action on the
+provisioning component:
+
+```yaml
+button:
+  - platform: template
+    name: Assign Servo 2
+    on_press:
+      - sts3215.set_id:
+          id: servo_bus
+          current_id: 1
+          new_id: 2
+```
+
+Both IDs may also be templated. Broadcast IDs 254/255 and out-of-range runtime
+values are rejected. Normal blind firmware rejects the action; ID changes
+are available only in the dedicated provisioning configuration.
+
 ## Blind calibration
 
 1. Press **Reset Calibration**. This clears all three points, defines the

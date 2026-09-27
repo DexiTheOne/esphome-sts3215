@@ -23,6 +23,24 @@ namespace sts3215 {
 
 class STS3215Component;
 
+class STS3215IDNumber : public number::Number {
+ public:
+  void set_parent(STS3215Component *parent) { parent_ = parent; }
+  void set_destination(bool value) { destination_ = value; }
+ protected:
+  void control(float value) override;
+  STS3215Component *parent_{nullptr};
+  bool destination_{false};
+};
+
+class STS3215SetIDButton : public button::Button {
+ public:
+  void set_parent(STS3215Component *parent) { parent_ = parent; }
+ protected:
+  void press_action() override;
+  STS3215Component *parent_{nullptr};
+};
+
 class STS3215PositionNumber : public number::Number {
  public:
   void set_parent(STS3215Component *parent) { parent_ = parent; }
@@ -240,6 +258,13 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool set_torque_limit(uint8_t servo_id, float percent);
   bool set_jog_increment(uint8_t servo_id, float degrees);
   void commission_step_mode(uint8_t servo_id);
+  void set_servo_id(int32_t current_id, int32_t new_id);
+  void set_selected_id(bool destination, uint8_t value) {
+    if (destination) selected_new_id_ = value;
+    else selected_current_id_ = value;
+  }
+  void provision_selected_id() { set_servo_id(selected_current_id_, selected_new_id_); }
+  void set_id_status_sensor(text_sensor::TextSensor *sensor) { id_status_sensor_ = sensor; }
   void calibration_action(uint8_t servo_id, uint8_t action);
   void command_cover(uint8_t servo_id, float position);
   void command_all_covers(float position);
@@ -260,6 +285,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   static constexpr uint8_t REG_GOAL_SPEED = 46;
   static constexpr uint8_t REG_TORQUE_LIMIT = 48;
   static constexpr uint8_t REG_EEPROM_LOCK = 55;
+  static constexpr uint8_t REG_ID = 5;
+  static constexpr uint8_t REG_MOVING = 66;
   static constexpr uint8_t REG_PRESENT_POSITION = 56;
   static constexpr float STEPS_PER_REVOLUTION = 4096.0f;
   static constexpr uint32_t PREFERENCE_VERSION = 3;
@@ -288,6 +315,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void update_cover_(STS3215Servo &servo);
   void update_group_cover_();
   void process_commissioning_();
+  void process_id_change_();
+  void fail_id_change_(const char *reason);
+  void publish_id_status_(const char *status);
   bool update_commission_state_(STS3215Servo &servo, bool log_result, bool *read_success = nullptr);
   void set_hardware_position_(STS3215Servo &servo, int32_t hardware_position);
   bool calibrated_(const STS3215Servo &servo) const {
@@ -345,6 +375,19 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   uint8_t commissioning_phase_{0};
   uint32_t commission_next_ms_{0};
   std::deque<uint8_t> pending_commission_ids_;
+  enum IDChangeState : uint8_t {
+    ID_IDLE, ID_WAIT_POWER, ID_CHECK, ID_TORQUE_OFF, ID_UNLOCK,
+    ID_WRITE, ID_RELOCK, ID_VERIFY,
+  };
+  IDChangeState id_change_state_{ID_IDLE};
+  uint8_t selected_current_id_{1};
+  uint8_t selected_new_id_{2};
+  uint8_t provisioning_current_id_{0};
+  uint8_t provisioning_new_id_{0};
+  uint32_t id_change_next_ms_{0};
+  bool id_unlock_attempted_{false};
+  bool id_write_attempted_{false};
+  text_sensor::TextSensor *id_status_sensor_{nullptr};
 };
 
 template<typename... Ts> class STS3215StepAction : public Action<Ts...>, public Parented<STS3215Component> {
@@ -352,6 +395,13 @@ template<typename... Ts> class STS3215StepAction : public Action<Ts...>, public 
   TEMPLATABLE_VALUE(uint8_t, servo_id)
   TEMPLATABLE_VALUE(float, degrees)
   void play(Ts... x) override { parent_->step(servo_id_.value(x...), degrees_.value(x...)); }
+};
+
+template<typename... Ts> class STS3215SetIDAction : public Action<Ts...>, public Parented<STS3215Component> {
+ public:
+  TEMPLATABLE_VALUE(int32_t, current_id)
+  TEMPLATABLE_VALUE(int32_t, new_id)
+  void play(Ts... x) override { this->parent_->set_servo_id(current_id_.value(x...), new_id_.value(x...)); }
 };
 
 }  // namespace sts3215
