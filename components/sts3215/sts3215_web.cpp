@@ -42,8 +42,8 @@ void append_bool(std::string &json, const char *key, bool value) {
 float sensor_value(sensor::Sensor *sensor) {
   return sensor != nullptr && sensor->has_state() ? sensor->state : NAN;
 }
-bool parse_int(const String &text, int32_t &value) {
-  if (text.isEmpty()) return false;
+bool parse_int(const std::string &text, int32_t &value) {
+  if (text.empty()) return false;
   const char *start = text.c_str();
   if (*start == '+' || *start == '-') ++start;
   if (*start == '\0') return false;
@@ -80,17 +80,17 @@ class STS3215WebHandler : public AsyncWebHandler {
       return;
     }
     if (url == "/sts3215/control") {
-      auto *id_arg = request->getParam("id", true);
-      auto *action_arg = request->getParam("action", true);
+      auto *id_arg = request->getParam("id");
+      auto *action_arg = request->getParam("action");
       int32_t id;
       if (id_arg == nullptr || action_arg == nullptr || !parse_int(id_arg->value(), id) || id < 1 || id > 253) {
         request->send(400, "text/plain", "Invalid control request");
         return;
       }
-      const String action = action_arg->value();
+      const std::string action = action_arg->value();
       bool success = false;
       if (action == "manual" || action == "edit") {
-        auto *value_arg = request->getParam("value", true);
+        auto *value_arg = request->getParam("value");
         if (value_arg != nullptr && (value_arg->value() == "0" || value_arg->value() == "1")) {
           const bool enabled = value_arg->value() == "1";
           success = action == "manual" ? parent_->set_manual_control(id, enabled) :
@@ -98,9 +98,9 @@ class STS3215WebHandler : public AsyncWebHandler {
         }
       } else if (action == "positions") {
         int32_t down, middle, up;
-        auto *d = request->getParam("down", true);
-        auto *m = request->getParam("middle", true);
-        auto *u = request->getParam("up", true);
+        auto *d = request->getParam("down");
+        auto *m = request->getParam("middle");
+        auto *u = request->getParam("up");
         if (d != nullptr && m != nullptr && u != nullptr && parse_int(d->value(), down) &&
             parse_int(m->value(), middle) && parse_int(u->value(), up))
           success = parent_->set_manual_positions(id, down, middle, up);
