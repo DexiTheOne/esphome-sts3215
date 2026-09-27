@@ -153,7 +153,6 @@ struct STS3215PreferenceData {
 };
 
 struct STS3215Servo {
-  uint32_t active_batch{0};
   uint8_t id;
   bool inverted;
   uint32_t preference_key;
@@ -186,6 +185,7 @@ struct STS3215Servo {
   bool moving{false};
   bool moving_seen{false};
   bool command_active{false};
+  uint32_t active_batch{0};
   uint32_t command_started{0};
   uint32_t last_motion_poll{0};
   ESPPreferenceObject preference;

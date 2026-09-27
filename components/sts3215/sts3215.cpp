@@ -318,8 +318,18 @@ void STS3215Component::update() {
 void STS3215Component::add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,
                                  float initial_speed, uint8_t initial_acceleration, float initial_torque,
                                  bool gravity_return_to_zero, uint8_t max_acceleration) {
-  servos_.push_back({servo_id, inverted, preference_key, initial_speed, initial_acceleration,
-                     initial_torque, gravity_return_to_zero, max_acceleration});
+  // Assign configuration explicitly so adding runtime fields cannot shift IDs
+  // or preference keys through aggregate initialization.
+  STS3215Servo servo{};
+  servo.id = servo_id;
+  servo.inverted = inverted;
+  servo.preference_key = preference_key;
+  servo.default_speed = initial_speed;
+  servo.default_acceleration = initial_acceleration;
+  servo.default_torque = initial_torque;
+  servo.gravity_return_to_zero = gravity_return_to_zero;
+  servo.max_acceleration = max_acceleration;
+  servos_.push_back(servo);
 }
 
 STS3215Servo *STS3215Component::find_servo_(uint8_t servo_id) {
