@@ -184,6 +184,7 @@ struct STS3215Servo {
   uint16_t speed_limit_raw{0};
   uint8_t acceleration_raw{0};
   uint16_t torque_limit_raw{0};
+  uint16_t auto_torque_limit_raw{250};
   float speed_limit_display{0.0f};
   float torque_limit_display{0.0f};
   float jog_increment{10.0f};
@@ -284,6 +285,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_id_status_sensor(text_sensor::TextSensor *sensor) { id_status_sensor_ = sensor; }
   void set_current_id_sensor(sensor::Sensor *sensor) { current_id_sensor_ = sensor; }
   void calibration_action(uint8_t servo_id, uint8_t action);
+  void set_auto_calibration_torque_limit(uint8_t id, uint16_t value);
   void set_calibration_direction_select(uint8_t id, STS3215CalibrationDirectionSelect *value);
   bool set_calibration_direction(uint8_t id, bool negative_is_down);
   void command_cover(uint8_t servo_id, float position);

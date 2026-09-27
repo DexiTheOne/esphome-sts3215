@@ -112,6 +112,7 @@ sts3215:
         name: Blind 6 Torque Limit
         mode: slider
       calibration:
+        auto_torque_limit: 25%
         auto_calibrate:
           name: Blind 6 Auto Calibrate
         negative_direction:
@@ -176,6 +177,7 @@ sts3215:
         name: Blind 5 Torque Limit
         mode: slider
       calibration:
+        auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 5 Auto Calibrate
         negative_direction:
@@ -240,6 +242,7 @@ sts3215:
         name: Blind 4 Torque Limit
         mode: slider
       calibration:
+        auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 4 Auto Calibrate
         negative_direction:
@@ -304,6 +307,7 @@ sts3215:
         name: Blind 3 Torque Limit
         mode: slider
       calibration:
+        auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 3 Auto Calibrate
         negative_direction:
@@ -368,6 +372,7 @@ sts3215:
         name: Blind 2 Torque Limit
         mode: slider
       calibration:
+        auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 2 Auto Calibrate
         negative_direction:
@@ -432,6 +437,7 @@ sts3215:
         name: Blind 1 Torque Limit
         mode: slider
       calibration:
+        auto_torque_limit: 25%
         auto_calibrate:
           name: Blind 1 Auto Calibrate
         negative_direction:

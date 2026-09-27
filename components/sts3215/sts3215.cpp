@@ -308,10 +308,12 @@ void STS3215Component::dump_config() {
     ESP_LOGCONFIG(TAG, "  Motor power-on delay: %u ms", static_cast<unsigned>(power_on_delay_ms_));
     ESP_LOGCONFIG(TAG, "  Motor power-off delay: %u ms", static_cast<unsigned>(power_off_delay_ms_));
   }
-  for (const auto &servo : servos_)
+  for (const auto &servo : servos_) {
     ESP_LOGCONFIG(TAG, "  Servo ID %u%s; calibration %s; gravity return %s", servo.id,
                   servo.inverted ? " (inverted)" : "", calibrated_(servo) ? "complete" : "incomplete",
                   YESNO(servo.gravity_return_to_zero));
+    ESP_LOGCONFIG(TAG, "    Auto calibration torque limit: %.1f%%", servo.auto_torque_limit_raw / 10.0f);
+  }
 }
 
 void STS3215Component::update() {
@@ -1145,6 +1147,11 @@ bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_re
   return ready;
 }
 
+void STS3215Component::set_auto_calibration_torque_limit(uint8_t id, uint16_t value) {
+  auto *servo = find_servo_(id);
+  if (servo != nullptr) servo->auto_torque_limit_raw = value;
+}
+
 void STS3215Component::set_calibration_direction_select(uint8_t id, STS3215CalibrationDirectionSelect *value) {
   auto *servo = find_servo_(id);
   if (servo != nullptr) servo->direction_select = value;
@@ -1206,11 +1213,12 @@ void STS3215Component::start_auto_step_(STS3215Servo &servo) {
   write_register_(servo.id, REG_TORQUE_ENABLE, &enabled, 1);
   // Torque-off can restore volatile settings on some servos. Reapply and
   // verify the calibration limit on every step before commanding motion.
-  const uint8_t torque[] = {250, 0};
+  const uint8_t torque[] = {static_cast<uint8_t>(servo.auto_torque_limit_raw),
+                          static_cast<uint8_t>(servo.auto_torque_limit_raw >> 8)};
   write_register_(servo.id, REG_TORQUE_LIMIT, torque, sizeof(torque));
   uint8_t accepted[2];
   if (!read_register_(servo.id, REG_TORQUE_LIMIT, accepted, sizeof(accepted)) ||
-      decode_u16_(accepted) != 250) {
+      decode_u16_(accepted) != servo.auto_torque_limit_raw) {
     finish_auto_calibration_(false);
     return;
   }
@@ -1399,11 +1407,12 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
       return;
     }
     // Only volatile RAM registers are changed, leaving user settings intact.
-    const uint8_t torque[] = {250, 0};
+    const uint8_t torque[] = {static_cast<uint8_t>(servo->auto_torque_limit_raw),
+                            static_cast<uint8_t>(servo->auto_torque_limit_raw >> 8)};
     write_register_(servo_id, REG_TORQUE_LIMIT, torque, sizeof(torque));
     uint8_t accepted[10];
     if (!read_register_(servo_id, REG_TORQUE_ENABLE, accepted, sizeof(accepted)) ||
-        decode_u16_(&accepted[8]) != 250) {
+        decode_u16_(&accepted[8]) != servo->auto_torque_limit_raw) {
       finish_auto_calibration_(false);
       return;
     }

@@ -88,6 +88,7 @@ sts3215:
       multi_turn_mode:
         name: Multi-Turn Mode Active
       calibration:
+        auto_torque_limit: 25%
         auto_calibrate:
           name: Auto Calibrate
         negative_direction:
@@ -288,7 +289,8 @@ selection across reboots, and locks when calibration is complete. Negative
 means the logical jog direction, so `inverted` still applies.
 
 Auto calibration searches negative first, then positive, with 10-degree steps.
-It uses a 100°/s speed limit, 25% torque limit, and acceleration 15 (or the
+It uses a 100°/s speed limit, a per-blind `calibration.auto_torque_limit`
+(default 25%, configurable from 0.1% to 100%), and acceleration 15 (or the
 configured `max_acceleration` if lower), temporarily overriding the normal
 settings. After each move it disables torque, waits a full second, then reads
 fresh encoder feedback. A shortfall or bounce of more than five counts (about
@@ -310,7 +312,7 @@ movement and setting changes are ignored while it runs. Telemetry loss, servo
 faults, continued movement after settling, coordinate exhaustion, or exceeding
 `move_timeout` on either search aborts without completing calibration. Auto
 calibration does not commission a servo or write its EEPROM. A blind that
-cannot move at 25% torque may appear to have reached an endpoint, so inspect
+cannot move at its configured calibration torque may appear to have reached an endpoint, so inspect
 the result on the real mechanism before relying on it.
 
 The optional **Calibration Status** text sensor reports `None` before a

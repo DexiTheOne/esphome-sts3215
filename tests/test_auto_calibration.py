@@ -31,6 +31,7 @@ struct STS3215Servo {
   int32_t position_raw=0, hardware_position_raw=0, target_raw=0;
   int32_t calibration_down=0, calibration_up=0, calibration_middle=0;
   uint16_t torque_limit_raw=300, speed_limit_raw=1024;
+  uint16_t auto_torque_limit_raw=250;
   Sensor *torque_sensor=nullptr, *position_sensor=nullptr, *position_raw_sensor=nullptr;
 };
 struct Write { uint8_t reg; std::vector<uint8_t> data; };
@@ -48,7 +49,7 @@ struct STS3215Component {
   STS3215Servo servo;
   std::vector<Write> writes;
   int32_t residual=0;
-  bool physical_moving=false, healthy=true;
+  bool physical_moving=false, healthy=true, accept_torque=true;
   uint8_t fault=0, torque=1;
   uint8_t mode=3, eeprom_lock=1;
   uint16_t torque_limit=300;
@@ -63,7 +64,7 @@ struct STS3215Component {
   bool write_register_(uint8_t, uint8_t reg, const uint8_t *p, uint8_t size) {
     writes.push_back({reg,{p,p+size}});
     if (reg==40) torque=p[0];
-    if (reg==48) torque_limit=p[0]|p[1]<<8;
+    if (reg==48 && accept_torque) torque_limit=p[0]|p[1]<<8;
     if (reg==33) { assert(torque==0 && eeprom_lock==1); mode=p[0]; }
     assert(reg>=40 || reg==33); // Mode writes require locked EEPROM and torque off.
     assert(reg!=55); // Never unlock EEPROM.
@@ -109,17 +110,20 @@ void step_and_settle(STS3215Component &c, int32_t settled_residual) {
   c.advance(1);
 }
 int main() {
-  for (bool inverted : {false,true}) for (bool negative_down : {false,true}) {
+  for (uint16_t limit : {250,600}) for (bool inverted : {false,true}) for (bool negative_down : {false,true}) {
     clock_ms=0;
     STS3215Component c;
     c.servo.inverted=inverted;
     c.servo.negative_is_down=negative_down;
+    c.servo.auto_torque_limit_raw=limit;
     const int sign=inverted ? -1 : 1;
     c.start_auto_step_(c.servo);
+    assert(c.torque_limit==limit);
     const auto move=c.writes.back();
     assert(move.reg==41 && move.data[0]==15 && move.data[3]==0 && move.data[4]==0);
     assert((move.data[5]|move.data[6]<<8)==1138); // 100 degrees/s.
     step_and_settle(c,0); // Full negative 10 degrees; continue searching.
+    assert(c.torque_limit==limit); // Reapplied after release and mode changes.
     assert(c.servo.position_raw==-114*sign && c.auto_direction_==-1);
     step_and_settle(c,-40*sign); // Bounce/shortfall only visible after release.
     assert(c.auto_direction_==1 && c.auto_first_endpoint_==-188*sign);
@@ -174,6 +178,12 @@ int main() {
   { // Reject unlocked EEPROM before any mode changes or reads are attempted.
     clock_ms=0; STS3215Component c; c.eeprom_lock=0; c.torque=0;
     int32_t encoder=0; assert(!c.read_auto_encoder_(c.servo,encoder) && c.writes.empty());
+  }
+  { // A rejected custom torque limit must abort before a movement packet.
+    clock_ms=0; STS3215Component c; c.servo.auto_torque_limit_raw=600; c.accept_torque=false;
+    c.start_auto_step_(c.servo);
+    assert(c.auto_state_==c.AUTO_IDLE && c.servo.calibration_error && c.torque==0);
+    for (const auto &write : c.writes) assert(write.reg!=41 || write.data.size()==1);
   }
 }
 '''.replace("RUNTIME", runtime)

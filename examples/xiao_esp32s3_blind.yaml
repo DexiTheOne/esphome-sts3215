@@ -108,6 +108,7 @@ sts3215:
         name: Blind 1 Torque Limit
         mode: slider
       calibration:
+        auto_torque_limit: 25%
         auto_calibrate:
           name: Blind 1 Auto Calibrate
         negative_direction:

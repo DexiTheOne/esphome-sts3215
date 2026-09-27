@@ -43,6 +43,7 @@ CONF_MOVE_TIMEOUT = "move_timeout"
 CONF_POSITION_TOLERANCE = "position_tolerance"
 CONF_CALIBRATION = "calibration"
 CONF_AUTO_CALIBRATE = "auto_calibrate"
+CONF_AUTO_TORQUE_LIMIT = "auto_torque_limit"
 CONF_NEGATIVE_DIRECTION = "negative_direction"
 CONF_JOG_INCREMENT = "jog_increment"
 CONF_JOG_FORWARD = "jog_forward"
@@ -107,6 +108,8 @@ def _unique_servo_ids(config):
 
 
 CALIBRATION_SCHEMA = cv.Schema({
+    cv.Optional(CONF_AUTO_TORQUE_LIMIT, default="25%"):
+        cv.All(cv.percentage, cv.Range(min=0.001)),
     cv.Optional(CONF_AUTO_CALIBRATE): button.button_schema(
         STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:autorenew"),
     cv.Optional(CONF_NEGATIVE_DIRECTION): select.select_schema(
@@ -314,6 +317,8 @@ async def to_code(config):
             cg.add(var.set_cover(servo_id, cov))
 
         if calibration := servo_config.get(CONF_CALIBRATION):
+            cg.add(var.set_auto_calibration_torque_limit(
+                servo_id, round(calibration[CONF_AUTO_TORQUE_LIMIT] * 1000)))
             if CONF_NEGATIVE_DIRECTION in calibration:
                 direction = await select.new_select(calibration[CONF_NEGATIVE_DIRECTION],
                     options=["Negative is down", "Negative is up"])

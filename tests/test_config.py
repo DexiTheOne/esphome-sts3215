@@ -66,6 +66,19 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(calibration["negative_direction"]["id"].type, component.STS3215CalibrationDirectionSelect)
         self.assertNotIn("calibration", config["servos"][1])
 
+    def test_auto_calibration_torque_limit(self):
+        default = component.CONFIG_SCHEMA({"servos": [{"servo_id": 6,
+            "calibration": {"auto_calibrate": {"name": "Auto"}}}]})
+        self.assertEqual(default["servos"][0]["calibration"]["auto_torque_limit"], 0.25)
+        for value, expected in (("25%", 0.25), ("60%", 0.6), ("100%", 1.0), ("0.1%", 0.001)):
+            config = component.CONFIG_SCHEMA({"servos": [{"servo_id": 4,
+                "calibration": {"auto_torque_limit": value}}]})
+            self.assertEqual(config["servos"][0]["calibration"]["auto_torque_limit"], expected)
+        for value in ("0%", "-1%", "101%"):
+            with self.subTest(value=value), self.assertRaises(cv.Invalid):
+                component.CONFIG_SCHEMA({"servos": [{"servo_id": 4,
+                    "calibration": {"auto_torque_limit": value}}]})
+
     def test_panel_without_servos(self):
         config = component.CONFIG_SCHEMA({"provisioning": self.panel()})
         self.assertEqual(config["servos"], [])
