@@ -676,7 +676,7 @@ void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
   const bool final_leg = std::none_of(move_queue_.begin(), move_queue_.end(),
       [&servo](const STS3215QueuedMove &move) { return move.servo_id == servo.id; });
   if (!timed_out && servo.overextend && servo.overextend_state == 0 && final_leg &&
-      calibrated_(servo) && std::abs(servo.position_raw - servo.target_raw) <= position_tolerance_ &&
+      calibrated_(servo) &&
       (servo.target_raw == servo.calibration_down || servo.target_raw == servo.calibration_up)) {
     int32_t encoder;
     const uint8_t disabled = 0;
@@ -684,6 +684,7 @@ void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
     if (read_auto_encoder_(servo, encoder)) {
       servo.overextend_endpoint = servo.target_raw;
       servo.overextend_encoder = encoder;
+      servo.overextend_start = servo.position_raw;
       servo.overextend_state = 1;
       const uint16_t limit = std::min<uint16_t>(servo.torque_limit_raw, 250);
       const uint8_t torque[] = {static_cast<uint8_t>(limit), static_cast<uint8_t>(limit >> 8)};
@@ -731,7 +732,7 @@ void STS3215Component::process_overextend_(STS3215Servo &servo) {
     int32_t delta = encoder - servo.overextend_encoder;
     if (delta > 2048) delta -= 4096;
     if (delta < -2048) delta += 4096;
-    servo.position_raw = servo.overextend_endpoint + delta;
+    servo.position_raw = servo.overextend_start + delta;
     ESP_LOGI(TAG, "Servo %u overextend settled: endpoint=%ld actual=%ld offset=%ld", servo.id,
              static_cast<long>(servo.overextend_endpoint), static_cast<long>(servo.position_raw),
              static_cast<long>(delta));

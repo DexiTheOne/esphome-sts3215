@@ -24,7 +24,7 @@ struct STS3215Servo {
  uint8_t id=6, overextend_state=0;
  bool overextend_failed=false, overextend=true, command_active=true, moving_seen=true, moving=false, has_position=true, mode_ready=true;
  int32_t position_raw=1000, target_raw=1000, calibration_down=0, calibration_middle=500, calibration_up=1000;
- int32_t overextend_endpoint=0, overextend_encoder=0;
+ int32_t overextend_endpoint=0, overextend_encoder=0, overextend_start=0;
  uint32_t overextend_released=0;
  uint16_t torque_limit_raw=400;
  Sensor *torque_sensor=nullptr;
@@ -61,6 +61,7 @@ int main() {
  c.finish_move_(s,false);assert(s.target_raw==-228);
  s.position_raw=-228;c.finish_move_(s,false);clock_ms=2000;c.encoder=4090;c.process_overextend_(s);
  assert(s.position_raw==-106);
+ s=STS3215Servo{};s.position_raw=992;c.finish_move_(s,false);assert(s.overextend_start==992 && s.target_raw==1220);
  s=STS3215Servo{};c.move_queue_.push_back({6});int starts=c.begins;c.finish_move_(s,false);
  assert(c.begins==starts && !s.command_active);
  c.move_queue_.clear();s=STS3215Servo{};c.finish_move_(s,true);assert(c.begins==starts);

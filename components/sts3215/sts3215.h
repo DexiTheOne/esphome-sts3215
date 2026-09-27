@@ -205,6 +205,7 @@ struct STS3215Servo {
   uint8_t overextend_state{0};  // 1: tug, 2: torque-free settling
   int32_t overextend_endpoint{0};
   int32_t overextend_encoder{0};
+  int32_t overextend_start{0};
   uint32_t overextend_released{0};
   uint32_t active_batch{0};
   uint32_t command_started{0};

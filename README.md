@@ -512,3 +512,18 @@ torque limit, and uses the measured position for the next move. Calibration
 endpoints are unchanged. Settling remains part of the staggered movement
 sequence; duplicate endpoint requests preserve the tug and settling period.
 The log reports the settled offset in encoder counts.
+
+### Endpoint overextension
+
+Set `overextend: true` on each servo to tug a final calibrated 0% or 100%
+cover target outward by another 20 degrees. The tug caps torque at 25% of full
+power (or the configured torque limit if lower). Intermediate gravity-return
+legs do not tug. The option defaults to false.
+
+After releasing torque, the component keeps motor power on for at least one
+second, even with a shorter `power_off_delay`. It reads the settled physical
+encoder using EEPROM-locked RAM mode changes, restores Mode 3 and the normal
+torque limit, and uses the measured position for the next move. Calibration
+endpoints are unchanged. Settling remains part of the staggered movement
+sequence; duplicate endpoint requests preserve the tug and settling period.
+The log reports the settled offset in encoder counts.
