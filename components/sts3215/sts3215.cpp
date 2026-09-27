@@ -16,6 +16,11 @@ static float tilt_openness(float tilt) {
   return 1.0f - std::abs(tilt * 2.0f - 1.0f);
 }
 
+static cover::CoverOperation operation_for_target(float tilt) {
+  return tilt <= 0.0f || tilt >= 1.0f
+      ? cover::COVER_OPERATION_CLOSING : cover::COVER_OPERATION_OPENING;
+}
+
 static float next_cover_quarter(float tilt, bool increase) {
   constexpr int QUARTER_COUNT = 4;
   const float scaled = std::max(0.0f, std::min(1.0f, tilt)) * QUARTER_COUNT;
@@ -988,9 +993,8 @@ void STS3215Component::command_cover(uint8_t servo_id, float position) {
   }
   if (servo->cover != nullptr) {
     const float current_tilt = cover_position_for_raw_(*servo, servo->position_raw);
-    const auto operation = tilt_openness(position) >= tilt_openness(current_tilt)
-        ? cover::COVER_OPERATION_OPENING : cover::COVER_OPERATION_CLOSING;
-    servo->cover->update_from_parent(position, tilt_openness(position), operation);
+    const auto operation = operation_for_target(position);
+    servo->cover->update_from_parent(position, tilt_openness(current_tilt), operation);
   }
 }
 
@@ -1142,6 +1146,10 @@ int32_t STS3215Component::raw_for_cover_position_(const STS3215Servo &servo, flo
 float STS3215Component::cover_position_for_raw_(const STS3215Servo &servo, int32_t raw) const {
   const int32_t first = servo.calibration_middle - servo.calibration_down;
   const int32_t second = servo.calibration_up - servo.calibration_middle;
+  // Arrival allows a small encoder error. HA requires exactly zero openness
+  // for Closed, so use the same tolerance at both closed endpoints.
+  if (std::abs(raw - servo.calibration_down) <= position_tolerance_) return 0.0f;
+  if (std::abs(raw - servo.calibration_up) <= position_tolerance_) return 1.0f;
   if (first == 0 || second == 0) return 0.0f;
   const bool before_middle = first > 0 ? raw <= servo.calibration_middle : raw >= servo.calibration_middle;
   float result;
@@ -1161,10 +1169,9 @@ void STS3215Component::update_cover_(STS3215Servo &servo) {
   float reported_tilt = current_tilt;
   if (pending) {
     reported_tilt = cover_position_for_raw_(servo, pending_target);
-    operation = tilt_openness(reported_tilt) >= tilt_openness(current_tilt)
-        ? cover::COVER_OPERATION_OPENING : cover::COVER_OPERATION_CLOSING;
+    operation = operation_for_target(reported_tilt);
   }
-  servo.cover->update_from_parent(reported_tilt, tilt_openness(reported_tilt), operation);
+  servo.cover->update_from_parent(reported_tilt, tilt_openness(current_tilt), operation);
 }
 
 void STS3215Component::update_group_cover_() {
@@ -1181,12 +1188,12 @@ void STS3215Component::update_group_cover_() {
     const bool pending = pending_target_(servo, target);
     if (pending) reported_tilt = cover_position_for_raw_(servo, target);
     tilt_sum += reported_tilt;
-    openness_sum += tilt_openness(reported_tilt);
+    openness_sum += tilt_openness(current_tilt);
     count++;
     if (pending) {
       const float target_tilt = cover_position_for_raw_(servo, target);
-      opening |= tilt_openness(target_tilt) >= tilt_openness(current_tilt);
-      closing |= tilt_openness(target_tilt) < tilt_openness(current_tilt);
+      opening |= operation_for_target(target_tilt) == cover::COVER_OPERATION_OPENING;
+      closing |= operation_for_target(target_tilt) == cover::COVER_OPERATION_CLOSING;
     }
   }
   if (count == 0) return;

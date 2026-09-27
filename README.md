@@ -241,7 +241,10 @@ the target is reached, motion stops, or `move_timeout` expires. The status
 entities expose encoder position, moving state, and actual torque-enable state.
 While moving, the Home Assistant cover entity continues to report the final
 requested tilt instead of publishing intermediate progress. Live progress stays
-available through the position diagnostics.
+available through the position diagnostics. Open/closed state uses measured
+openness, so it does not announce the destination before the motor arrives.
+Encoder readings within `position_tolerance` of either closed endpoint report
+exactly closed, including readings that stop just short of the endpoint.
 
 For blind leaves that settle by gravity, enable this per servo:
 
@@ -276,6 +279,18 @@ servos:
       - name: Blind 1 Closed Up 100%
         tilt_position: 100%
 ```
+Home Assistant's native cover state supports only `opening`, `closing`, `open`,
+and `closed`; ESPHome cannot rename those states to Moving Up/Moving Down.
+Commands to 0% or 100% tilt report **Closing**; commands to any intermediate
+tilt report **Opening**, including gravity-return sequences, whose label uses
+the final requested target. A group reports Opening if any pending target is
+intermediate, otherwise Closing while endpoint moves remain pending.
+For a separate **Opening / Closing / Open / Closed** display sensor, merge
+[`examples/home_assistant_blind_state.yaml`](examples/home_assistant_blind_state.yaml)
+into Home Assistant's configuration, replace the example cover entity ID, and
+show the resulting sensor beside your cover controls. The standard cover
+control itself retains Home Assistant's built-in movement labels.
+
 
 The cover's tilt slider retains the physical orientation scale: both endpoints
 are fully closed and 50% is fully open. The component calculates the cover's

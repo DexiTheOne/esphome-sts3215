@@ -1,0 +1,19 @@
+# Merge into Home Assistant configuration.yaml (not ESPHome).
+# Replace cover.blind_1 with the actual entity ID from Developer Tools > States.
+# Display this sensor beside the cover controls for movement and endpoint state.
+template:
+  - sensor:
+      - name: Blind 1 State
+        unique_id: sts3215_blind_1_display_state
+        availability: "{{ has_value('cover.blind_1') }}"
+        state: >-
+          {% set state = states('cover.blind_1') %}
+          {% if state == 'opening' %}
+            Opening
+          {% elif state == 'closing' %}
+            Closing
+          {% elif state == 'closed' %}
+            Closed
+          {% else %}
+            Open
+          {% endif %}
