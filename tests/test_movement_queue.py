@@ -112,7 +112,8 @@ int main() {
   assert(fifo.starts==std::vector<uint8_t>({1,1,2}));
   // No-op and missing servos do not consume start intervals.
   STS3215Component skip; skip.overlapping_=true; now_ms=0;
-  skip.move_queue_={{99,100},{1,0},{2,100}};
+  skip.servos_[0].position_raw=100;
+  skip.move_queue_={{99,100},{1,100},{2,100}};
   skip.schedule(); skip.schedule(); skip.schedule();
   assert(skip.starts==std::vector<uint8_t>({2}));
   // Ripple uses physical list order, pairing outer IDs even for odd counts.
