@@ -79,6 +79,12 @@ class ConfigTests(unittest.TestCase):
                 component.CONFIG_SCHEMA({"servos": [{"servo_id": 4,
                     "calibration": {"auto_torque_limit": value}}]})
 
+    def test_overextend_is_opt_in(self):
+        config = component.CONFIG_SCHEMA({"servos": [{"servo_id": 6},
+            {"servo_id": 5, "overextend": True}]})
+        self.assertFalse(config["servos"][0]["overextend"])
+        self.assertTrue(config["servos"][1]["overextend"])
+
     def test_panel_without_servos(self):
         config = component.CONFIG_SCHEMA({"provisioning": self.panel()})
         self.assertEqual(config["servos"], [])

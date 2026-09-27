@@ -157,6 +157,19 @@ int main() {
   assert(gravity.starts==std::vector<uint8_t>({1,3,1,3}));
   gravity.servos_[2].command_active=false; gravity.schedule();
   assert(gravity.starts.back()==2);
+  // Settling keeps the outer batch active and exposes its endpoint, not the tug target.
+  STS3215Component settling;
+  settling.move_queue_={{1,100,1},{3,100,1},{2,100,2}};
+  now_ms=0;settling.schedule();settling.schedule();
+  settling.servos_[0].overextend_state=2;
+  settling.servos_[0].overextend_endpoint=100;
+  settling.servos_[0].target_raw=328;
+  int32_t final_target=0;
+  assert(settling.pending_target_(settling.servos_[0],final_target) && final_target==100);
+  settling.servos_[2].command_active=false;
+  now_ms=3000;settling.schedule();assert(settling.starts.size()==2);
+  settling.servos_[0].command_active=false;
+  settling.schedule();assert(settling.starts.back()==2);
   // Uncalibrated members are skipped without changing physical pairing.
   STS3215Component partial; partial.servos_={{6},{5},{4}};
   partial.servos_[0].calibrated=false; partial.command_ripple_(0.5f,false,false);
