@@ -634,7 +634,7 @@ void STS3215Component::poll_servo_(STS3215Servo &servo) {
       ESP_LOGW(TAG, "Servo %u did not begin moving within 5 s; clearing queued moves", servo.id);
       remove_queued_(servo.id);
       finish_move_(servo, true);
-    } else if ((elapsed >= 250 && arrived) || stopped_after_motion || elapsed >= move_timeout_ms_)
+    } else if ((elapsed >= 250 && arrived && (!servo.overextend || !servo.moving)) || stopped_after_motion || elapsed >= move_timeout_ms_)
       finish_move_(servo, elapsed >= move_timeout_ms_ && !arrived);
   }
   update_cover_(servo);
@@ -735,7 +735,7 @@ void STS3215Component::process_overextend_(STS3215Servo &servo) {
     servo.position_raw = servo.overextend_start + delta;
     ESP_LOGI(TAG, "Servo %u overextend settled: endpoint=%ld actual=%ld offset=%ld", servo.id,
              static_cast<long>(servo.overextend_endpoint), static_cast<long>(servo.position_raw),
-             static_cast<long>(delta));
+             static_cast<long>(servo.position_raw - servo.overextend_endpoint));
     servo.target_raw = servo.position_raw;
   } else {
     servo.mode_ready = false;
