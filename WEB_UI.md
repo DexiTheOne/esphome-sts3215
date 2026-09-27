@@ -60,10 +60,19 @@ position is blue fill clamped to that range. Green lines mark measured saved
 points, blue lines mark calculated midpoint and active move target, and red
 marks the servo's logical zero. For incomplete calibration, the bar uses the
 available points plus the current reading with a minimum display span. The
-right column shows saved encoder points and command targets for down, middle,
-and up. The top button starts auto calibration; the controls to the left handle
-jogging and manual point capture. Reset unlocks manual calibration. Direction
-is below the bar.
+right column shows saved encoder points for down, middle, and up. A red/green
+striped line marks an endpoint that overlaps servo zero. The top button starts
+auto calibration; the controls to the left handle jogging, stopping, and point
+capture. Jog increment and output speed use degrees. Stop also cancels auto
+calibration. Direction is below the bar.
+
+Manual Control starts off after boot for valid calibration and on when
+calibration is absent or invalid. Turning it on permits jogging and capturing
+positions without clearing calibration. Edit Positions starts off after boot.
+It accepts whole number encoder counts for all three positions, with the middle
+strictly between the endpoints. Saving marks all three as Manual, including a
+formerly calculated midpoint. Calibration point values and their provenance
+persist through power cycles and OTA; the two editing toggles do not.
 
 The component saves per-motor speed, acceleration, torque limit, jog increment,
 direction choice, calibration points, and last logical position in ESP32 flash.

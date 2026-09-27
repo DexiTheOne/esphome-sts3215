@@ -3,6 +3,10 @@
 #ifdef USE_STS3215_WEB_UI
 
 #include <cmath>
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <limits>
 #include <string>
 
 #include "web_dashboard.h"
@@ -38,6 +42,20 @@ void append_bool(std::string &json, const char *key, bool value) {
 float sensor_value(sensor::Sensor *sensor) {
   return sensor != nullptr && sensor->has_state() ? sensor->state : NAN;
 }
+bool parse_int(const String &text, int32_t &value) {
+  if (text.isEmpty()) return false;
+  const char *start = text.c_str();
+  if (*start == '+' || *start == '-') ++start;
+  if (*start == '\0') return false;
+  for (const char *p = start; *p; ++p) if (*p < '0' || *p > '9') return false;
+  errno = 0;
+  char *end;
+  const long parsed = strtol(text.c_str(), &end, 10);
+  if (errno != 0 || *end != '\0' || parsed < std::numeric_limits<int32_t>::min() ||
+      parsed > std::numeric_limits<int32_t>::max()) return false;
+  value = static_cast<int32_t>(parsed);
+  return true;
+}
 }  // namespace
 
 class STS3215WebHandler : public AsyncWebHandler {
@@ -45,10 +63,10 @@ class STS3215WebHandler : public AsyncWebHandler {
   explicit STS3215WebHandler(STS3215Component *parent) : parent_(parent) {}
 
   bool canHandle(AsyncWebServerRequest *request) const override {
-    if (request->method() != HTTP_GET) return false;
     char url_buffer[AsyncWebServerRequest::URL_BUF_SIZE];
     auto url = request->url_to(url_buffer);
-    return url == "/" || url == "/sts3215/state";
+    return (request->method() == HTTP_GET && (url == "/" || url == "/sts3215/state")) ||
+        (request->method() == HTTP_POST && url == "/sts3215/control");
   }
 
   void handleRequest(AsyncWebServerRequest *request) override {
@@ -59,6 +77,35 @@ class STS3215WebHandler : public AsyncWebHandler {
           200, "text/html; charset=utf-8", reinterpret_cast<const uint8_t *>(STS3215_DASHBOARD_HTML),
           sizeof(STS3215_DASHBOARD_HTML) - 1);
       request->send(response);
+      return;
+    }
+    if (url == "/sts3215/control") {
+      auto *id_arg = request->getParam("id", true);
+      auto *action_arg = request->getParam("action", true);
+      int32_t id;
+      if (id_arg == nullptr || action_arg == nullptr || !parse_int(id_arg->value(), id) || id < 1 || id > 253) {
+        request->send(400, "text/plain", "Invalid control request");
+        return;
+      }
+      const String action = action_arg->value();
+      bool success = false;
+      if (action == "manual" || action == "edit") {
+        auto *value_arg = request->getParam("value", true);
+        if (value_arg != nullptr && (value_arg->value() == "0" || value_arg->value() == "1")) {
+          const bool enabled = value_arg->value() == "1";
+          success = action == "manual" ? parent_->set_manual_control(id, enabled) :
+              parent_->set_edit_positions(id, enabled);
+        }
+      } else if (action == "positions") {
+        int32_t down, middle, up;
+        auto *d = request->getParam("down", true);
+        auto *m = request->getParam("middle", true);
+        auto *u = request->getParam("up", true);
+        if (d != nullptr && m != nullptr && u != nullptr && parse_int(d->value(), down) &&
+            parse_int(m->value(), middle) && parse_int(u->value(), up))
+          success = parent_->set_manual_positions(id, down, middle, up);
+      }
+      request->send(success ? 200 : 400, "text/plain", success ? "OK" : "Invalid or unavailable control");
       return;
     }
 
@@ -81,9 +128,10 @@ class STS3215WebHandler : public AsyncWebHandler {
       append_int(json, "mask", servo.calibration_mask);
       append_bool(json, "calibrated", parent_->calibrated_(servo));
       append_bool(json, "unlocked", servo.calibration_unlocked);
-      append_bool(json, "middle_calculated", servo.calibration_mask == 0x07 &&
-                  servo.calibration_middle == servo.calibration_down +
-                      (servo.calibration_up - servo.calibration_down) / 2);
+      append_bool(json, "manual_control", servo.manual_control);
+      append_bool(json, "edit_positions", servo.edit_positions);
+      append_bool(json, "positions_manual", servo.positions_manual);
+      append_bool(json, "middle_calculated", servo.middle_calculated);
       append_bool(json, "negative_is_down", servo.negative_is_down);
       append_bool(json, "auto_active", parent_->auto_state_ != STS3215Component::AUTO_IDLE &&
                   parent_->auto_servo_id_ == servo.id);

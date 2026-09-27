@@ -199,6 +199,10 @@ struct STS3215Servo {
   int32_t calibration_up{0};
   uint8_t calibration_mask{0};
   bool calibration_unlocked{false};
+  bool manual_control{false};
+  bool edit_positions{false};
+  bool middle_calculated{false};
+  bool positions_manual{false};
   bool calibration_error{false};
   bool negative_is_down{true};
   ESPPreferenceObject direction_preference;
@@ -302,6 +306,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_id_status_sensor(text_sensor::TextSensor *sensor) { id_status_sensor_ = sensor; }
   void set_current_id_sensor(sensor::Sensor *sensor) { current_id_sensor_ = sensor; }
   void calibration_action(uint8_t servo_id, uint8_t action);
+  bool set_manual_control(uint8_t servo_id, bool enabled);
+  bool set_edit_positions(uint8_t servo_id, bool enabled);
+  bool set_manual_positions(uint8_t servo_id, int32_t down, int32_t middle, int32_t up);
   void set_auto_calibration_torque_limit(uint8_t id, uint16_t value);
   void set_calibration_direction_select(uint8_t id, STS3215CalibrationDirectionSelect *value);
   bool set_calibration_direction(uint8_t id, bool negative_is_down);

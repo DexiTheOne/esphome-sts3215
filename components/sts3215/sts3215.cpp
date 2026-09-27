@@ -1243,7 +1243,7 @@ void STS3215Component::set_calibration_direction_select(uint8_t id, STS3215Calib
 
 bool STS3215Component::set_calibration_direction(uint8_t id, bool negative_is_down) {
   auto *servo = find_servo_(id);
-  if (servo == nullptr || auto_state_ != AUTO_IDLE || calibrated_(*servo)) return false;
+  if (servo == nullptr || auto_state_ != AUTO_IDLE || (calibrated_(*servo) && !servo->manual_control)) return false;
   servo->negative_is_down = negative_is_down;
   servo->direction_preference.save(&servo->negative_is_down);
   global_preferences->sync();
@@ -1397,6 +1397,8 @@ void STS3215Component::process_auto_calibration_() {
     servo->calibration_up = first_is_down ? servo->position_raw : auto_first_endpoint_;
     servo->calibration_middle = servo->calibration_down +
         (servo->calibration_up - servo->calibration_down) / 2;
+    servo->middle_calculated = true;
+    servo->positions_manual = false;
     servo->calibration_mask = 0x07;
     finish_auto_calibration_(true);
     return;
@@ -1421,6 +1423,7 @@ void STS3215Component::finish_auto_calibration_(bool success) {
   servo->target_raw = servo->position_raw;
   servo->calibration_error = !success;
   servo->calibration_unlocked = !success;
+  if (success) servo->manual_control = false;
   if (servo->torque_sensor != nullptr) servo->torque_sensor->publish_state(false);
   save_preferences_(*servo);
   publish_calibration_status_(*servo);
@@ -1453,6 +1456,9 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     servo->calibration_middle = 0;
     servo->calibration_up = 0;
     servo->calibration_mask = 0;
+    servo->middle_calculated = false;
+    servo->positions_manual = false;
+    servo->manual_control = true;
     servo->reported_endpoint = -1;
     servo->endpoint_preference.save(&servo->reported_endpoint);
     servo->calibration_unlocked = true;
@@ -1506,8 +1512,8 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     publish_calibration_status_(*servo);
     return;
   }
-  if (!servo->calibration_unlocked) {
-    ESP_LOGW(TAG, "Blind %u calibration controls are locked; press Reset Blind Calibration first", servo_id);
+  if (!servo->manual_control) {
+    ESP_LOGW(TAG, "Blind %u manual controls are disabled", servo_id);
     return;
   }
   if (action == 0 || action == 1) {
@@ -1546,7 +1552,8 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     finish_move_(*servo, false);
   }
   if (action == 2) { servo->calibration_down = servo->position_raw; servo->calibration_mask |= 0x01; }
-  if (action == 3) { servo->calibration_middle = servo->position_raw; servo->calibration_mask |= 0x02; }
+  if (action == 3) { servo->calibration_middle = servo->position_raw; servo->calibration_mask |= 0x02; servo->middle_calculated = false; }
+  servo->positions_manual = false;
   if (action == 4) { servo->calibration_up = servo->position_raw; servo->calibration_mask |= 0x04; }
   servo->calibration_error = false;
   const char *point_name = action == 2 ? "down" : (action == 3 ? "middle" : "up");
@@ -1567,7 +1574,7 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     }
   } else if (servo->calibration_mask == 0x07) {
     servo->calibration_unlocked = false;
-    ESP_LOGI(TAG, "Servo %u blind calibration complete; point buttons locked and cover enabled", servo_id);
+    ESP_LOGI(TAG, "Servo %u blind calibration complete; cover enabled", servo_id);
   }
   save_preferences_(*servo);
   publish_calibration_status_(*servo);
@@ -1732,6 +1739,39 @@ void STS3215Component::stop_all() {
       finish_move_(servo, true);
 }
 
+bool STS3215Component::set_manual_control(uint8_t servo_id, bool enabled) {
+  auto *servo = find_servo_(servo_id);
+  if (servo == nullptr || auto_state_ != AUTO_IDLE) return false;
+  servo->manual_control = enabled;
+  return true;
+}
+
+bool STS3215Component::set_edit_positions(uint8_t servo_id, bool enabled) {
+  auto *servo = find_servo_(servo_id);
+  if (servo == nullptr || auto_state_ != AUTO_IDLE) return false;
+  servo->edit_positions = enabled;
+  return true;
+}
+
+bool STS3215Component::set_manual_positions(uint8_t servo_id, int32_t down, int32_t middle, int32_t up) {
+  auto *servo = find_servo_(servo_id);
+  if (servo == nullptr || !servo->edit_positions || auto_state_ != AUTO_IDLE || servo->command_active) return false;
+  if (!((down < middle && middle < up) || (down > middle && middle > up))) return false;
+  servo->calibration_down = down;
+  servo->calibration_middle = middle;
+  servo->calibration_up = up;
+  servo->calibration_mask = 0x07;
+  servo->middle_calculated = false;
+  servo->positions_manual = true;
+  servo->calibration_unlocked = false;
+  servo->calibration_error = false;
+  save_preferences_(*servo);
+  publish_calibration_status_(*servo);
+  update_cover_(*servo);
+  update_group_cover_();
+  return true;
+}
+
 void STS3215Component::load_preferences_(STS3215Servo &servo) {
   STS3215PreferenceData data{};
   const bool loaded = servo.preference.load(&data);
@@ -1746,7 +1786,11 @@ void STS3215Component::load_preferences_(STS3215Servo &servo) {
       servo.calibration_middle = data.middle;
       servo.calibration_up = data.up;
       servo.calibration_mask = data.calibration_mask;
-      servo.calibration_unlocked = data.reserved != 0;
+      servo.calibration_unlocked = (data.reserved & 0x01) != 0;
+      servo.middle_calculated = (data.reserved & 0x08) != 0 ? (data.reserved & 0x02) != 0 :
+          servo.calibration_mask == 0x07 && servo.calibration_middle ==
+              servo.calibration_down + (servo.calibration_up - servo.calibration_down) / 2;
+      servo.positions_manual = (data.reserved & 0x04) != 0;
       servo.saved_position = data.last_position;
       servo.saved_position_valid = data.last_position_valid != 0;
     } else {
@@ -1762,6 +1806,7 @@ void STS3215Component::load_preferences_(STS3215Servo &servo) {
   servo.acceleration_raw = std::min(servo.acceleration_raw, servo.max_acceleration);
   servo.speed_limit_raw = speed_to_raw_(servo.speed_limit_display);
   servo.torque_limit_raw = static_cast<uint16_t>(servo.torque_limit_display * 10.0f);
+  servo.manual_control = !calibrated_(servo);
   if (legacy) save_preferences_(servo);
 }
 
@@ -1774,7 +1819,8 @@ void STS3215Component::save_preferences_(STS3215Servo &servo) {
       PREFERENCE_VERSION, servo.speed_limit_display, servo.torque_limit_display, servo.jog_increment,
       servo.calibration_down, servo.calibration_middle, servo.calibration_up,
       servo.saved_position, servo.acceleration_raw, servo.calibration_mask,
-      static_cast<uint8_t>(servo.saved_position_valid), static_cast<uint8_t>(servo.calibration_unlocked)};
+      static_cast<uint8_t>(servo.saved_position_valid), static_cast<uint8_t>((servo.calibration_unlocked ? 1 : 0) |
+          (servo.middle_calculated ? 2 : 0) | (servo.positions_manual ? 4 : 0) | 8)};
   if (!servo.preference.save(&data))
     ESP_LOGW(TAG, "Failed to save preferences for servo %u", servo.id);
   else
