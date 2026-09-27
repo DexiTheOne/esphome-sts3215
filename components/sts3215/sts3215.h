@@ -9,6 +9,7 @@
 #include "esphome/components/button/button.h"
 #include "esphome/components/cover/cover.h"
 #include "esphome/components/number/number.h"
+#include "esphome/components/select/select.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
@@ -22,6 +23,16 @@ namespace esphome {
 namespace sts3215 {
 
 class STS3215Component;
+
+class STS3215CalibrationDirectionSelect : public select::Select {
+ public:
+  void set_parent(STS3215Component *parent) { parent_ = parent; }
+  void set_servo_id(uint8_t value) { servo_id_ = value; }
+ protected:
+  void control(const std::string &value) override;
+  STS3215Component *parent_{nullptr};
+  uint8_t servo_id_{0};
+};
 
 class STS3215IDNumber : public number::Number {
  public:
@@ -182,6 +193,9 @@ struct STS3215Servo {
   uint8_t calibration_mask{0};
   bool calibration_unlocked{false};
   bool calibration_error{false};
+  bool negative_is_down{true};
+  ESPPreferenceObject direction_preference;
+  STS3215CalibrationDirectionSelect *direction_select{nullptr};
   bool moving{false};
   bool moving_seen{false};
   bool command_active{false};
@@ -270,6 +284,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_id_status_sensor(text_sensor::TextSensor *sensor) { id_status_sensor_ = sensor; }
   void set_current_id_sensor(sensor::Sensor *sensor) { current_id_sensor_ = sensor; }
   void calibration_action(uint8_t servo_id, uint8_t action);
+  void set_calibration_direction_select(uint8_t id, STS3215CalibrationDirectionSelect *value);
+  bool set_calibration_direction(uint8_t id, bool negative_is_down);
   void command_cover(uint8_t servo_id, float position);
   void command_all_covers(float position);
   void step_cover(uint8_t servo_id, bool increase);
@@ -306,6 +322,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void initialize_powered_bus_();
   void invalidate_telemetry_();
   void poll_servo_(STS3215Servo &servo);
+  void process_auto_calibration_();
+  void finish_auto_calibration_(bool success);
+  void start_auto_step_(STS3215Servo &servo);
   void begin_move_(STS3215Servo &servo, int32_t target_raw);
   void finish_move_(STS3215Servo &servo, bool timed_out);
   void command_cover_from_(uint8_t servo_id, float position, int32_t previous_target);
@@ -350,6 +369,12 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   std::vector<STS3215Servo> servos_;
   std::deque<STS3215QueuedMove> move_queue_;
   std::deque<std::pair<uint8_t, uint8_t>> calibration_queue_;
+  enum AutoCalibrationState { AUTO_IDLE, AUTO_MOVE, AUTO_SETTLE };
+  AutoCalibrationState auto_state_{AUTO_IDLE};
+  uint8_t auto_servo_id_{0};
+  int8_t auto_direction_{-1};
+  int32_t auto_target_{0}, auto_first_endpoint_{0};
+  uint32_t auto_started_{0}, auto_phase_started_{0}, auto_last_poll_{0};
   STS3215GroupCover *group_cover_{nullptr};
   uint32_t response_timeout_ms_{50};
   bool overlapping_{false};

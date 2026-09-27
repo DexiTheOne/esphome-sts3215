@@ -27,6 +27,7 @@ struct STS3215AccelerationNumber {};
 struct STS3215TorqueLimitNumber {};
 struct STS3215JogIncrementNumber {};
 struct STS3215Cover {};
+struct STS3215CalibrationDirectionSelect {};
 STRUCTURE
 struct STS3215Component {
   std::vector<STS3215Servo> servos_;

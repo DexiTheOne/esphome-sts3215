@@ -2,7 +2,7 @@ import zlib
 
 from esphome import automation
 import esphome.codegen as cg
-from esphome.components import binary_sensor, button, cover, number, sensor, text_sensor, uart
+from esphome.components import binary_sensor, button, cover, number, select, sensor, text_sensor, uart
 from esphome import pins
 import esphome.config_validation as cv
 from esphome.const import (
@@ -14,7 +14,7 @@ from esphome.const import (
 
 CODEOWNERS = []
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["binary_sensor", "button", "cover", "number", "sensor", "text_sensor"]
+AUTO_LOAD = ["binary_sensor", "button", "cover", "number", "select", "sensor", "text_sensor"]
 MULTI_CONF = True
 
 CONF_SERVOS = "servos"
@@ -42,6 +42,8 @@ CONF_MOVEMENT_ORDER = "movement_order"
 CONF_MOVE_TIMEOUT = "move_timeout"
 CONF_POSITION_TOLERANCE = "position_tolerance"
 CONF_CALIBRATION = "calibration"
+CONF_AUTO_CALIBRATE = "auto_calibrate"
+CONF_NEGATIVE_DIRECTION = "negative_direction"
 CONF_JOG_INCREMENT = "jog_increment"
 CONF_JOG_FORWARD = "jog_forward"
 CONF_JOG_REVERSE = "jog_reverse"
@@ -78,6 +80,7 @@ STS3215JogIncrementNumber = sts3215_ns.class_("STS3215JogIncrementNumber", numbe
 STS3215Cover = sts3215_ns.class_("STS3215Cover", cover.Cover)
 STS3215GroupCover = sts3215_ns.class_("STS3215GroupCover", cover.Cover)
 STS3215CalibrationButton = sts3215_ns.class_("STS3215CalibrationButton", button.Button)
+STS3215CalibrationDirectionSelect = sts3215_ns.class_("STS3215CalibrationDirectionSelect", select.Select)
 STS3215PresetButton = sts3215_ns.class_("STS3215PresetButton", button.Button)
 STS3215StepAction = sts3215_ns.class_("STS3215StepAction", automation.Action)
 STS3215SetIDAction = sts3215_ns.class_("STS3215SetIDAction", automation.Action)
@@ -104,6 +107,10 @@ def _unique_servo_ids(config):
 
 
 CALIBRATION_SCHEMA = cv.Schema({
+    cv.Optional(CONF_AUTO_CALIBRATE): button.button_schema(
+        STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:autorenew"),
+    cv.Optional(CONF_NEGATIVE_DIRECTION): select.select_schema(
+        STS3215CalibrationDirectionSelect, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:swap-vertical"),
     cv.Optional(CONF_RESET_BLINDS): button.button_schema(
         STS3215CalibrationButton, entity_category=ENTITY_CATEGORY_CONFIG, icon="mdi:restart-alert"),
     cv.Optional(CONF_CALIBRATION_STATUS): text_sensor.text_sensor_schema(
@@ -307,6 +314,12 @@ async def to_code(config):
             cg.add(var.set_cover(servo_id, cov))
 
         if calibration := servo_config.get(CONF_CALIBRATION):
+            if CONF_NEGATIVE_DIRECTION in calibration:
+                direction = await select.new_select(calibration[CONF_NEGATIVE_DIRECTION],
+                    options=["Negative is down", "Negative is up"])
+                cg.add(direction.set_parent(var))
+                cg.add(direction.set_servo_id(servo_id))
+                cg.add(var.set_calibration_direction_select(servo_id, direction))
             if CONF_CALIBRATION_STATUS in calibration:
                 status = await text_sensor.new_text_sensor(calibration[CONF_CALIBRATION_STATUS])
                 cg.add(var.set_calibration_status_sensor(servo_id, status))
@@ -316,6 +329,7 @@ async def to_code(config):
                 cg.add(var.set_jog_increment_number(servo_id, jog))
             for key, action in {
                 CONF_RESET_BLINDS: 6,
+                CONF_AUTO_CALIBRATE: 7,
                 CONF_JOG_FORWARD: 0, CONF_JOG_REVERSE: 1, CONF_SET_DOWN: 2,
                 CONF_SET_MIDDLE: 3, CONF_SET_UP: 4,
             }.items():

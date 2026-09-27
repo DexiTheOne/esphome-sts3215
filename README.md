@@ -88,6 +88,10 @@ sts3215:
       multi_turn_mode:
         name: Multi-Turn Mode Active
       calibration:
+        auto_calibrate:
+          name: Auto Calibrate
+        negative_direction:
+          name: Negative Direction
         reset_blinds:
           name: Reset Calibration
         status:
@@ -276,10 +280,39 @@ over. ESPHome buttons cannot publish per-entity availability, so Home Assistant
 may continue to draw the locked buttons normally, but presses are rejected by
 the device until calibration is reset.
 
+Alternatively, configure `calibration.auto_calibrate` to expose an **Auto
+Calibrate** button for each blind. It accepts presses only when calibration is
+missing or has been reset. The optional `calibration.negative_direction` select
+offers **Negative is down** (default) and **Negative is up**, remembers the
+selection across reboots, and locks when calibration is complete. Negative
+means the logical jog direction, so `inverted` still applies.
+
+Auto calibration searches negative first, then positive, with 10-degree steps.
+It uses a 100°/s speed limit, 25% torque limit, and acceleration 15 (or the
+configured `max_acceleration` if lower), temporarily overriding the normal
+settings. After each move it disables torque, waits a full second, then reads
+fresh encoder feedback. A shortfall or bounce of more than five counts (about
+0.44°) identifies an endpoint. It saves the measured, settled position as the
+endpoint and derives the middle halfway between both endpoints. All other
+cover positions follow the existing mapping. Normal settings are restored and
+torque stays disabled when the sequence ends.
+
+The bus must be idle to start; calibration runs one blind at a time. The shared
+power relay stays on throughout both searches, including every torque-off
+settling period. Stop on the blind or aggregate cover cancels the sequence;
+movement and setting changes are ignored while it runs. Telemetry loss, servo
+faults, continued movement after settling, coordinate exhaustion, or exceeding
+`move_timeout` on either search aborts without completing calibration. Auto
+calibration does not commission a servo or write its EEPROM. A blind that
+cannot move at 25% torque may appear to have reached an endpoint, so inspect
+the result on the real mechanism before relying on it.
+
 The optional **Calibration Status** text sensor reports `None` before a
 calibration session, `Active` after Reset Calibration unlocks jogging and point
 capture, `Ok` when all three points form a valid sequence, or `Error` when a
-point cannot be captured or the three points are inconsistent. A successful
+point cannot be captured or the three points are inconsistent. During auto
+calibration it reports `Auto calibrating: negative search` or `Auto calibrating:
+positive search`. A successful
 retry clears a transient error; invalid saved points remain `Error` after a
 reboot until corrected or reset. The example exposes this sensor in the same
 device configuration group as Reset Calibration; Home Assistant controls the

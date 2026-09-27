@@ -55,6 +55,17 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(cv.Invalid):
             component.CONFIG_SCHEMA({"servos": [{"servo_id": 1}, {"servo_id": 1}]})
 
+    def test_per_blind_auto_calibration_controls(self):
+        config = component.CONFIG_SCHEMA({"servos": [
+            {"servo_id": 6, "calibration": {
+                "auto_calibrate": {"name": "Blind 6 Auto Calibrate"},
+                "negative_direction": {"name": "Blind 6 Negative Direction"}}},
+            {"servo_id": 5}]})
+        calibration = config["servos"][0]["calibration"]
+        self.assertEqual(calibration["auto_calibrate"]["id"].type, component.STS3215CalibrationButton)
+        self.assertEqual(calibration["negative_direction"]["id"].type, component.STS3215CalibrationDirectionSelect)
+        self.assertNotIn("calibration", config["servos"][1])
+
     def test_panel_without_servos(self):
         config = component.CONFIG_SCHEMA({"provisioning": self.panel()})
         self.assertEqual(config["servos"], [])

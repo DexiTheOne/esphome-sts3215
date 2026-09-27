@@ -46,6 +46,11 @@ void STS3215Component::setup() {
   for (auto &servo : servos_) {
     servo.preference = global_preferences->make_preference<STS3215PreferenceData>(servo.preference_key);
     load_preferences_(servo);
+    // Keep this separate from the existing position/calibration preference layout.
+    servo.direction_preference = global_preferences->make_preference<bool>(servo.preference_key ^ 0xAC321500);
+    servo.direction_preference.load(&servo.negative_is_down);
+    if (servo.direction_select != nullptr)
+      servo.direction_select->publish_state(servo.negative_is_down ? "Negative is down" : "Negative is up");
     if (servo.saved_position_valid) {
       servo.position_raw = servo.saved_position;
       servo.has_position = true;
@@ -165,7 +170,7 @@ void STS3215Component::loop() {
     }
     bool active = false;
     for (const auto &servo : servos_) active |= servo.command_active;
-    const bool idle = move_queue_.empty() && calibration_queue_.empty() && pending_commission_ids_.empty() &&
+    const bool idle = auto_state_ == AUTO_IDLE && move_queue_.empty() && calibration_queue_.empty() && pending_commission_ids_.empty() &&
                       commission_state_ == COMMISSION_IDLE && id_change_state_ == ID_IDLE && !active &&
                       !(servos_.empty() && current_id_sensor_ != nullptr);
     if (power_on_ && idle) {
@@ -180,6 +185,10 @@ void STS3215Component::loop() {
       idle_timer_active_ = false;
     }
   }
+  if (auto_state_ != AUTO_IDLE) {
+    process_auto_calibration_();
+    return;
+  }
   if (id_change_state_ != ID_IDLE) {
     process_id_change_();
     return;
@@ -193,6 +202,7 @@ void STS3215Component::loop() {
     const auto action = calibration_queue_.front();
     calibration_queue_.pop_front();
     calibration_action(action.first, action.second);
+    if (auto_state_ != AUTO_IDLE) return;
   }
   if (commission_state_ == COMMISSION_IDLE && !pending_commission_ids_.empty()) {
     const uint8_t servo_id = pending_commission_ids_.front();
@@ -311,7 +321,7 @@ void STS3215Component::update() {
     publish_calibration_status_(servo);
   if (power_pin_ != nullptr && (!power_on_ || !power_ready_)) return;
   for (auto &servo : servos_)
-    poll_servo_(servo);
+    if (auto_state_ == AUTO_IDLE || servo.id != auto_servo_id_) poll_servo_(servo);
   update_group_cover_();
 }
 
@@ -715,6 +725,7 @@ void STS3215Component::remove_queued_(uint8_t servo_id) {
 }
 
 bool STS3215Component::command_position(uint8_t servo_id, float degrees) {
+  if (auto_state_ != AUTO_IDLE) return false;
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
   enqueue_move_(servo_id, degrees_to_raw_(degrees, servo->inverted));
@@ -722,6 +733,7 @@ bool STS3215Component::command_position(uint8_t servo_id, float degrees) {
 }
 
 bool STS3215Component::step(uint8_t servo_id, float degrees) {
+  if (auto_state_ != AUTO_IDLE) return false;
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
   if (!servo->has_position) {
@@ -747,6 +759,7 @@ bool STS3215Component::step(uint8_t servo_id, float degrees) {
 }
 
 bool STS3215Component::set_speed_limit(uint8_t servo_id, float value) {
+  if (auto_state_ != AUTO_IDLE) return false;
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
   servo->speed_limit_display = std::round(std::max(0.0f, std::min(360.0f, value)));
@@ -760,6 +773,7 @@ bool STS3215Component::set_speed_limit(uint8_t servo_id, float value) {
 }
 
 bool STS3215Component::set_acceleration(uint8_t servo_id, float value) {
+  if (auto_state_ != AUTO_IDLE) return false;
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
   servo->acceleration_raw = static_cast<uint8_t>(
@@ -780,6 +794,7 @@ bool STS3215Component::set_acceleration(uint8_t servo_id, float value) {
 }
 
 bool STS3215Component::set_torque_limit(uint8_t servo_id, float value) {
+  if (auto_state_ != AUTO_IDLE) return false;
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return false;
   servo->torque_limit_display = std::round(std::max(0.0f, std::min(100.0f, value)));
@@ -980,6 +995,7 @@ void STS3215Component::process_id_change_() {
 }
 
 void STS3215Component::commission_step_mode(uint8_t servo_id) {
+  if (auto_state_ != AUTO_IDLE) return;
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
 
@@ -1129,9 +1145,172 @@ bool STS3215Component::update_commission_state_(STS3215Servo &servo, bool log_re
   return ready;
 }
 
+void STS3215Component::set_calibration_direction_select(uint8_t id, STS3215CalibrationDirectionSelect *value) {
+  auto *servo = find_servo_(id);
+  if (servo != nullptr) servo->direction_select = value;
+}
+
+bool STS3215Component::set_calibration_direction(uint8_t id, bool negative_is_down) {
+  auto *servo = find_servo_(id);
+  if (servo == nullptr || auto_state_ != AUTO_IDLE || calibrated_(*servo)) return false;
+  servo->negative_is_down = negative_is_down;
+  servo->direction_preference.save(&servo->negative_is_down);
+  global_preferences->sync();
+  return true;
+}
+
+void STS3215CalibrationDirectionSelect::control(const std::string &value) {
+  if (parent_ != nullptr && parent_->set_calibration_direction(servo_id_, value == "Negative is down"))
+    publish_state(value);
+  else
+    ESP_LOGW(TAG, "Calibration direction is locked; reset calibration first");
+}
+
+void STS3215Component::start_auto_step_(STS3215Servo &servo) {
+  const int32_t delta = degrees_to_raw_(10.0f * auto_direction_, servo.inverted);
+  auto_target_ = servo.position_raw + delta;
+  if (auto_target_ < -32767 || auto_target_ > 32767) {
+    ESP_LOGW(TAG, "Servo %u auto calibration reached the coordinate limit", servo.id);
+    finish_auto_calibration_(false);
+    return;
+  }
+  const uint8_t enabled = 1;
+  write_register_(servo.id, REG_TORQUE_ENABLE, &enabled, 1);
+  // Torque-off can restore volatile settings on some servos. Reapply and
+  // verify the calibration limit on every step before commanding motion.
+  const uint8_t torque[] = {250, 0};
+  write_register_(servo.id, REG_TORQUE_LIMIT, torque, sizeof(torque));
+  uint8_t accepted[2];
+  if (!read_register_(servo.id, REG_TORQUE_LIMIT, accepted, sizeof(accepted)) ||
+      decode_u16_(accepted) != 250) {
+    finish_auto_calibration_(false);
+    return;
+  }
+  const uint16_t encoded = encode_signed_(delta);
+  const uint16_t speed = speed_to_raw_(100.0f);
+  const uint8_t data[] = {static_cast<uint8_t>(std::min<uint8_t>(15, servo.max_acceleration)),
+      static_cast<uint8_t>(encoded), static_cast<uint8_t>(encoded >> 8), 0, 0,
+      static_cast<uint8_t>(speed), static_cast<uint8_t>(speed >> 8)};
+  write_register_(servo.id, REG_ACCELERATION, data, sizeof(data));
+  auto_state_ = AUTO_MOVE;
+  auto_phase_started_ = millis();
+  auto_last_poll_ = auto_phase_started_;
+  servo.moving = true;
+  if (servo.torque_sensor != nullptr) servo.torque_sensor->publish_state(true);
+}
+
+void STS3215Component::process_auto_calibration_() {
+  auto *servo = find_servo_(auto_servo_id_);
+  if (servo == nullptr) { auto_state_ = AUTO_IDLE; return; }
+  const uint32_t now = millis();
+  if (now - auto_started_ >= move_timeout_ms_) {
+    ESP_LOGW(TAG, "Servo %u auto calibration search timed out", servo->id);
+    finish_auto_calibration_(false);
+    return;
+  }
+  // No position sample is used until the entire torque-off second has elapsed.
+  if (auto_state_ == AUTO_SETTLE && now - auto_phase_started_ < 1000) return;
+  if (now - auto_last_poll_ < 25) return;
+  auto_last_poll_ = now;
+  uint8_t feedback[11];
+  if (!read_register_(servo->id, REG_PRESENT_POSITION, feedback, sizeof(feedback)) || feedback[9] != 0) {
+    ESP_LOGW(TAG, "Servo %u auto calibration aborted: missing telemetry or servo fault", servo->id);
+    finish_auto_calibration_(false);
+    return;
+  }
+  servo->moving = feedback[10] != 0;
+  if (auto_state_ == AUTO_MOVE) {
+    // A blocked motor may keep MOVING asserted indefinitely. Give the small
+    // move time to finish, then release it even if the endpoint prevents arrival.
+    const uint32_t elapsed = now - auto_phase_started_;
+    if (elapsed < 250 || (servo->moving && elapsed < 1500)) return;
+    const uint8_t disabled = 0;
+    write_register_(servo->id, REG_TORQUE_ENABLE, &disabled, 1);
+    if (servo->torque_sensor != nullptr) servo->torque_sensor->publish_state(false);
+    uint8_t torque;
+    if (!read_register_(servo->id, REG_TORQUE_ENABLE, &torque, 1) || torque != 0) {
+      finish_auto_calibration_(false);
+      return;
+    }
+    auto_state_ = AUTO_SETTLE;
+    auto_phase_started_ = millis();
+    return;
+  }
+  // Phase bit 4 makes Mode 3 feedback the signed remaining distance. It
+  // continues to describe displacement relative to the last commanded target.
+  const int32_t remaining = decode_signed_(decode_u16_(&feedback[0]), 15);
+  servo->hardware_position_raw = remaining;
+  servo->position_raw = auto_target_ - remaining;
+  servo->has_position = true;
+  if (servo->position_sensor != nullptr)
+    servo->position_sensor->publish_state(raw_to_degrees_(servo->position_raw, servo->inverted));
+  if (servo->position_raw_sensor != nullptr) servo->position_raw_sensor->publish_state(servo->position_raw);
+  if (servo->moving) { finish_auto_calibration_(false); return; }
+  // Five encoder counts (~0.44 degrees) distinguish bounce/short travel from
+  // encoder quantization. Never use the requested target as an endpoint.
+  const int32_t delta = degrees_to_raw_(10.0f * auto_direction_, servo->inverted);
+  const bool endpoint = (delta > 0 ? remaining : -remaining) > 5;
+  ESP_LOGI(TAG, "Servo %u auto calibration settled: target=%ld actual=%ld remaining=%ld endpoint=%s",
+           servo->id, static_cast<long>(auto_target_), static_cast<long>(servo->position_raw),
+           static_cast<long>(remaining), YESNO(endpoint));
+  if (endpoint && auto_direction_ < 0) {
+    auto_first_endpoint_ = servo->position_raw;
+    auto_direction_ = 1;
+    auto_started_ = millis();
+    publish_calibration_status_(*servo);
+  } else if (endpoint) {
+    if (std::abs(servo->position_raw - auto_first_endpoint_) <= 10) {
+      finish_auto_calibration_(false);
+      return;
+    }
+    const bool first_is_down = servo->negative_is_down;
+    servo->calibration_down = first_is_down ? auto_first_endpoint_ : servo->position_raw;
+    servo->calibration_up = first_is_down ? servo->position_raw : auto_first_endpoint_;
+    servo->calibration_middle = servo->calibration_down +
+        (servo->calibration_up - servo->calibration_down) / 2;
+    servo->calibration_mask = 0x07;
+    finish_auto_calibration_(true);
+    return;
+  }
+  start_auto_step_(*servo);
+}
+
+void STS3215Component::finish_auto_calibration_(bool success) {
+  auto *servo = find_servo_(auto_servo_id_);
+  if (servo == nullptr) { auto_state_ = AUTO_IDLE; return; }
+  const uint8_t disabled = 0;
+  write_register_(servo->id, REG_TORQUE_ENABLE, &disabled, 1);
+  const uint8_t torque[] = {static_cast<uint8_t>(servo->torque_limit_raw),
+                          static_cast<uint8_t>(servo->torque_limit_raw >> 8)};
+  const uint8_t speed[] = {static_cast<uint8_t>(servo->speed_limit_raw),
+                          static_cast<uint8_t>(servo->speed_limit_raw >> 8)};
+  write_register_(servo->id, REG_TORQUE_LIMIT, torque, sizeof(torque));
+  write_register_(servo->id, REG_GOAL_SPEED, speed, sizeof(speed));
+  write_register_(servo->id, REG_ACCELERATION, &servo->acceleration_raw, 1);
+  auto_state_ = AUTO_IDLE;
+  servo->moving = false;
+  servo->target_raw = servo->position_raw;
+  servo->calibration_error = !success;
+  servo->calibration_unlocked = !success;
+  if (servo->torque_sensor != nullptr) servo->torque_sensor->publish_state(false);
+  save_preferences_(*servo);
+  publish_calibration_status_(*servo);
+  update_cover_(*servo);
+  update_group_cover_();
+  ESP_LOGI(TAG, "Servo %u auto calibration %s", servo->id, success ? "complete" : "aborted");
+}
+
 void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
+  if (auto_state_ != AUTO_IDLE) {
+    ESP_LOGW(TAG, "Auto calibration is active; stop it before using calibration controls");
+    return;
+  }
+  if (action == 7 && calibrated_(*servo)) {
+    ESP_LOGW(TAG, "Blind %u auto calibration is locked; reset calibration first", servo_id);
+    return;
+  }
   if (power_pin_ != nullptr && !power_ready_) {
     calibration_queue_.emplace_back(servo_id, action);
     return;
@@ -1154,6 +1333,39 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     if (servo->target_position_number != nullptr)
       servo->target_position_number->publish_state(0);
     ESP_LOGW(TAG, "Blind %u calibration reset at logical position zero; calibration controls unlocked", servo_id);
+    return;
+  }
+  if (action == 7) {
+    if (commission_state_ != COMMISSION_IDLE || !pending_commission_ids_.empty() ||
+        id_change_state_ != ID_IDLE || !move_queue_.empty() ||
+        std::any_of(servos_.begin(), servos_.end(), [](const STS3215Servo &s) { return s.command_active; })) {
+      ESP_LOGW(TAG, "Auto calibration requires an idle bus");
+      return;
+    }
+    if (!update_commission_state_(*servo, true)) {
+      servo->calibration_error = true;
+      publish_calibration_status_(*servo);
+      return;
+    }
+    auto_servo_id_ = servo_id;
+    auto_direction_ = -1;
+    auto_started_ = millis();
+    servo->calibration_error = false;
+    servo->calibration_unlocked = true;
+    servo->calibration_mask = 0;
+    save_preferences_(*servo);
+    auto_state_ = AUTO_MOVE;
+    // Only volatile RAM registers are changed, leaving user settings intact.
+    const uint8_t torque[] = {250, 0};
+    write_register_(servo_id, REG_TORQUE_LIMIT, torque, sizeof(torque));
+    uint8_t accepted[10];
+    if (!read_register_(servo_id, REG_TORQUE_ENABLE, accepted, sizeof(accepted)) ||
+        decode_u16_(&accepted[8]) != 250) {
+      finish_auto_calibration_(false);
+      return;
+    }
+    start_auto_step_(*servo);
+    publish_calibration_status_(*servo);
     return;
   }
   if (!servo->calibration_unlocked) {
@@ -1225,6 +1437,7 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
 }
 
 void STS3215Component::command_cover(uint8_t servo_id, float position) {
+  if (auto_state_ != AUTO_IDLE) return;
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
   if (!calibrated_(*servo)) {
@@ -1299,6 +1512,7 @@ void STS3215Component::command_ripple_(float position, bool stepping, bool incre
 }
 
 void STS3215Component::command_all_covers(float position) {
+  if (auto_state_ != AUTO_IDLE) return;
   if (ripple_) {
     command_ripple_(position, false, false);
     return;
@@ -1310,6 +1524,7 @@ void STS3215Component::command_all_covers(float position) {
 }
 
 void STS3215Component::step_cover(uint8_t servo_id, bool increase) {
+  if (auto_state_ != AUTO_IDLE) return;
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
   if (!calibrated_(*servo)) {
@@ -1339,6 +1554,7 @@ float STS3215Component::cover_step_target_(const STS3215Servo &servo, int32_t pl
 }
 
 void STS3215Component::step_all_covers(bool increase) {
+  if (auto_state_ != AUTO_IDLE) return;
   if (ripple_) {
     command_ripple_(0.0f, true, increase);
     return;
@@ -1350,6 +1566,14 @@ void STS3215Component::step_all_covers(bool increase) {
 }
 
 void STS3215Component::stop_servo(uint8_t servo_id) {
+  calibration_queue_.erase(std::remove_if(calibration_queue_.begin(), calibration_queue_.end(),
+      [servo_id](const std::pair<uint8_t, uint8_t> &action) {
+        return action.first == servo_id && action.second == 7;
+      }), calibration_queue_.end());
+  if (auto_state_ != AUTO_IDLE && auto_servo_id_ == servo_id) {
+    finish_auto_calibration_(false);
+    return;
+  }
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr) return;
   ESP_LOGW(TAG, "Servo %u stop requested; active=%s, %u queued move(s)", servo_id,
@@ -1361,6 +1585,9 @@ void STS3215Component::stop_servo(uint8_t servo_id) {
 }
 
 void STS3215Component::stop_all() {
+  calibration_queue_.erase(std::remove_if(calibration_queue_.begin(), calibration_queue_.end(),
+      [](const std::pair<uint8_t, uint8_t> &action) { return action.second == 7; }), calibration_queue_.end());
+  if (auto_state_ != AUTO_IDLE) finish_auto_calibration_(false);
   move_queue_.clear();
   for (auto &servo : servos_)
     if (servo.command_active)
@@ -1437,7 +1664,9 @@ void STS3215Component::publish_settings_(STS3215Servo &servo) {
 void STS3215Component::publish_calibration_status_(STS3215Servo &servo) {
   if (servo.calibration_status_sensor == nullptr) return;
   const char *status = "None";
-  if (servo.calibration_error || (servo.calibration_mask == 0x07 && !calibrated_(servo)))
+  if (auto_state_ != AUTO_IDLE && auto_servo_id_ == servo.id)
+    status = auto_direction_ < 0 ? "Auto calibrating: negative search" : "Auto calibrating: positive search";
+  else if (servo.calibration_error || (servo.calibration_mask == 0x07 && !calibrated_(servo)))
     status = "Error";
   else if (servo.calibration_unlocked)
     status = "Active";
