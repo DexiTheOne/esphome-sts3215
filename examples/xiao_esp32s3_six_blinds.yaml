@@ -19,6 +19,13 @@ logger:
 
 api:
 
+web_server:
+  port: 80
+  version: 3
+  local: true
+  include_internal: true
+  ota: false
+
 ota:
   - platform: esphome
 
@@ -82,57 +89,81 @@ sts3215:
         name: Blind 6
       position:
         name: Blind 6 Encoder Position
+        internal: true
       position_raw:
         name: Blind 6 Encoder Position Raw
+        internal: true
       speed:
         name: Blind 6 Servo Speed
+        internal: true
       load:
         name: Blind 6 Servo Torque Output
+        internal: true
       temperature:
         name: Blind 6 Servo Temperature
+        internal: true
       voltage:
         name: Blind 6 Servo Voltage
+        internal: true
       current:
         name: Blind 6 Servo Current
+        internal: true
       status:
         name: Blind 6 Servo Status
+        internal: true
       moving:
         name: Blind 6 Servo Moving
+        internal: true
       torque_enabled:
         name: Blind 6 Torque Enabled
+        internal: true
       multi_turn_mode:
         name: Blind 6 Multi-Turn Mode Active
+        internal: true
       speed_limit:
         name: Blind 6 Speed Limit
+        internal: true
         mode: slider
       acceleration:
         name: Blind 6 Acceleration
+        internal: true
         mode: slider
       torque_limit:
         name: Blind 6 Torque Limit
+        internal: true
         mode: slider
       calibration:
         auto_torque_limit: 25%
         auto_calibrate:
           name: Blind 6 Auto Calibrate
+          internal: true
         negative_direction:
           name: Blind 6 Negative Direction
+          internal: true
         reset_blinds:
           name: Blind 6 Reset Calibration
+          internal: true
         status:
           name: Blind 6 Calibration Status
+          internal: true
         jog_increment:
           name: Blind 6 Jog Increment
+          internal: true
         jog_forward:
           name: Blind 6 Jog Forward
+          internal: true
         jog_reverse:
           name: Blind 6 Jog Reverse
+          internal: true
         set_down:
           name: Blind 6 Set Fully Down
+          internal: true
         set_middle:
           name: Blind 6 Set Middle
+          internal: true
         set_up:
           name: Blind 6 Set Fully Up
+          internal: true
 
     - servo_id: 5
       inverted: false
@@ -147,57 +178,81 @@ sts3215:
         name: Blind 5
       position:
         name: Blind 5 Encoder Position
+        internal: true
       position_raw:
         name: Blind 5 Encoder Position Raw
+        internal: true
       speed:
         name: Blind 5 Servo Speed
+        internal: true
       load:
         name: Blind 5 Servo Torque Output
+        internal: true
       temperature:
         name: Blind 5 Servo Temperature
+        internal: true
       voltage:
         name: Blind 5 Servo Voltage
+        internal: true
       current:
         name: Blind 5 Servo Current
+        internal: true
       status:
         name: Blind 5 Servo Status
+        internal: true
       moving:
         name: Blind 5 Servo Moving
+        internal: true
       torque_enabled:
         name: Blind 5 Torque Enabled
+        internal: true
       multi_turn_mode:
         name: Blind 5 Multi-Turn Mode Active
+        internal: true
       speed_limit:
         name: Blind 5 Speed Limit
+        internal: true
         mode: slider
       acceleration:
         name: Blind 5 Acceleration
+        internal: true
         mode: slider
       torque_limit:
         name: Blind 5 Torque Limit
+        internal: true
         mode: slider
       calibration:
         auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 5 Auto Calibrate
+          internal: true
         negative_direction:
           name: Blind 5 Negative Direction
+          internal: true
         reset_blinds:
           name: Blind 5 Reset Calibration
+          internal: true
         status:
           name: Blind 5 Calibration Status
+          internal: true
         jog_increment:
           name: Blind 5 Jog Increment
+          internal: true
         jog_forward:
           name: Blind 5 Jog Forward
+          internal: true
         jog_reverse:
           name: Blind 5 Jog Reverse
+          internal: true
         set_down:
           name: Blind 5 Set Fully Down
+          internal: true
         set_middle:
           name: Blind 5 Set Middle
+          internal: true
         set_up:
           name: Blind 5 Set Fully Up
+          internal: true
 
     - servo_id: 4
       inverted: false
@@ -212,57 +267,81 @@ sts3215:
         name: Blind 4
       position:
         name: Blind 4 Encoder Position
+        internal: true
       position_raw:
         name: Blind 4 Encoder Position Raw
+        internal: true
       speed:
         name: Blind 4 Servo Speed
+        internal: true
       load:
         name: Blind 4 Servo Torque Output
+        internal: true
       temperature:
         name: Blind 4 Servo Temperature
+        internal: true
       voltage:
         name: Blind 4 Servo Voltage
+        internal: true
       current:
         name: Blind 4 Servo Current
+        internal: true
       status:
         name: Blind 4 Servo Status
+        internal: true
       moving:
         name: Blind 4 Servo Moving
+        internal: true
       torque_enabled:
         name: Blind 4 Torque Enabled
+        internal: true
       multi_turn_mode:
         name: Blind 4 Multi-Turn Mode Active
+        internal: true
       speed_limit:
         name: Blind 4 Speed Limit
+        internal: true
         mode: slider
       acceleration:
         name: Blind 4 Acceleration
+        internal: true
         mode: slider
       torque_limit:
         name: Blind 4 Torque Limit
+        internal: true
         mode: slider
       calibration:
         auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 4 Auto Calibrate
+          internal: true
         negative_direction:
           name: Blind 4 Negative Direction
+          internal: true
         reset_blinds:
           name: Blind 4 Reset Calibration
+          internal: true
         status:
           name: Blind 4 Calibration Status
+          internal: true
         jog_increment:
           name: Blind 4 Jog Increment
+          internal: true
         jog_forward:
           name: Blind 4 Jog Forward
+          internal: true
         jog_reverse:
           name: Blind 4 Jog Reverse
+          internal: true
         set_down:
           name: Blind 4 Set Fully Down
+          internal: true
         set_middle:
           name: Blind 4 Set Middle
+          internal: true
         set_up:
           name: Blind 4 Set Fully Up
+          internal: true
 
     - servo_id: 3
       inverted: false
@@ -277,57 +356,81 @@ sts3215:
         name: Blind 3
       position:
         name: Blind 3 Encoder Position
+        internal: true
       position_raw:
         name: Blind 3 Encoder Position Raw
+        internal: true
       speed:
         name: Blind 3 Servo Speed
+        internal: true
       load:
         name: Blind 3 Servo Torque Output
+        internal: true
       temperature:
         name: Blind 3 Servo Temperature
+        internal: true
       voltage:
         name: Blind 3 Servo Voltage
+        internal: true
       current:
         name: Blind 3 Servo Current
+        internal: true
       status:
         name: Blind 3 Servo Status
+        internal: true
       moving:
         name: Blind 3 Servo Moving
+        internal: true
       torque_enabled:
         name: Blind 3 Torque Enabled
+        internal: true
       multi_turn_mode:
         name: Blind 3 Multi-Turn Mode Active
+        internal: true
       speed_limit:
         name: Blind 3 Speed Limit
+        internal: true
         mode: slider
       acceleration:
         name: Blind 3 Acceleration
+        internal: true
         mode: slider
       torque_limit:
         name: Blind 3 Torque Limit
+        internal: true
         mode: slider
       calibration:
         auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 3 Auto Calibrate
+          internal: true
         negative_direction:
           name: Blind 3 Negative Direction
+          internal: true
         reset_blinds:
           name: Blind 3 Reset Calibration
+          internal: true
         status:
           name: Blind 3 Calibration Status
+          internal: true
         jog_increment:
           name: Blind 3 Jog Increment
+          internal: true
         jog_forward:
           name: Blind 3 Jog Forward
+          internal: true
         jog_reverse:
           name: Blind 3 Jog Reverse
+          internal: true
         set_down:
           name: Blind 3 Set Fully Down
+          internal: true
         set_middle:
           name: Blind 3 Set Middle
+          internal: true
         set_up:
           name: Blind 3 Set Fully Up
+          internal: true
 
     - servo_id: 2
       inverted: false
@@ -342,57 +445,81 @@ sts3215:
         name: Blind 2
       position:
         name: Blind 2 Encoder Position
+        internal: true
       position_raw:
         name: Blind 2 Encoder Position Raw
+        internal: true
       speed:
         name: Blind 2 Servo Speed
+        internal: true
       load:
         name: Blind 2 Servo Torque Output
+        internal: true
       temperature:
         name: Blind 2 Servo Temperature
+        internal: true
       voltage:
         name: Blind 2 Servo Voltage
+        internal: true
       current:
         name: Blind 2 Servo Current
+        internal: true
       status:
         name: Blind 2 Servo Status
+        internal: true
       moving:
         name: Blind 2 Servo Moving
+        internal: true
       torque_enabled:
         name: Blind 2 Torque Enabled
+        internal: true
       multi_turn_mode:
         name: Blind 2 Multi-Turn Mode Active
+        internal: true
       speed_limit:
         name: Blind 2 Speed Limit
+        internal: true
         mode: slider
       acceleration:
         name: Blind 2 Acceleration
+        internal: true
         mode: slider
       torque_limit:
         name: Blind 2 Torque Limit
+        internal: true
         mode: slider
       calibration:
         auto_torque_limit: 60%
         auto_calibrate:
           name: Blind 2 Auto Calibrate
+          internal: true
         negative_direction:
           name: Blind 2 Negative Direction
+          internal: true
         reset_blinds:
           name: Blind 2 Reset Calibration
+          internal: true
         status:
           name: Blind 2 Calibration Status
+          internal: true
         jog_increment:
           name: Blind 2 Jog Increment
+          internal: true
         jog_forward:
           name: Blind 2 Jog Forward
+          internal: true
         jog_reverse:
           name: Blind 2 Jog Reverse
+          internal: true
         set_down:
           name: Blind 2 Set Fully Down
+          internal: true
         set_middle:
           name: Blind 2 Set Middle
+          internal: true
         set_up:
           name: Blind 2 Set Fully Up
+          internal: true
 
     - servo_id: 1
       inverted: false
@@ -407,54 +534,78 @@ sts3215:
         name: Blind 1
       position:
         name: Blind 1 Encoder Position
+        internal: true
       position_raw:
         name: Blind 1 Encoder Position Raw
+        internal: true
       speed:
         name: Blind 1 Servo Speed
+        internal: true
       load:
         name: Blind 1 Servo Torque Output
+        internal: true
       temperature:
         name: Blind 1 Servo Temperature
+        internal: true
       voltage:
         name: Blind 1 Servo Voltage
+        internal: true
       current:
         name: Blind 1 Servo Current
+        internal: true
       status:
         name: Blind 1 Servo Status
+        internal: true
       moving:
         name: Blind 1 Servo Moving
+        internal: true
       torque_enabled:
         name: Blind 1 Torque Enabled
+        internal: true
       multi_turn_mode:
         name: Blind 1 Multi-Turn Mode Active
+        internal: true
       speed_limit:
         name: Blind 1 Speed Limit
+        internal: true
         mode: slider
       acceleration:
         name: Blind 1 Acceleration
+        internal: true
         mode: slider
       torque_limit:
         name: Blind 1 Torque Limit
+        internal: true
         mode: slider
       calibration:
         auto_torque_limit: 25%
         auto_calibrate:
           name: Blind 1 Auto Calibrate
+          internal: true
         negative_direction:
           name: Blind 1 Negative Direction
+          internal: true
         reset_blinds:
           name: Blind 1 Reset Calibration
+          internal: true
         status:
           name: Blind 1 Calibration Status
+          internal: true
         jog_increment:
           name: Blind 1 Jog Increment
+          internal: true
         jog_forward:
           name: Blind 1 Jog Forward
+          internal: true
         jog_reverse:
           name: Blind 1 Jog Reverse
+          internal: true
         set_down:
           name: Blind 1 Set Fully Down
+          internal: true
         set_middle:
           name: Blind 1 Set Middle
+          internal: true
         set_up:
           name: Blind 1 Set Fully Up
+          internal: true
