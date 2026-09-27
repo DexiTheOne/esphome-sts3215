@@ -18,11 +18,17 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/gpio.h"
 #include "esphome/core/preferences.h"
+#ifdef USE_STS3215_WEB_UI
+#include "esphome/components/web_server_base/web_server_base.h"
+#endif
 
 namespace esphome {
 namespace sts3215 {
 
 class STS3215Component;
+#ifdef USE_STS3215_WEB_UI
+class STS3215WebHandler;
+#endif
 
 class STS3215CalibrationDirectionSelect : public select::Select {
  public:
@@ -305,6 +311,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void step_all_covers(bool increase);
   void stop_servo(uint8_t servo_id);
   void stop_all();
+#ifdef USE_STS3215_WEB_UI
+  void register_web_ui(web_server_base::WebServerBase *base);
+#endif
 
  protected:
   static constexpr uint8_t INST_READ = 0x02;
@@ -323,6 +332,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   static constexpr uint8_t REG_PRESENT_POSITION = 56;
   static constexpr float STEPS_PER_REVOLUTION = 4096.0f;
   static constexpr uint32_t PREFERENCE_VERSION = 3;
+#ifdef USE_STS3215_WEB_UI
+  friend class STS3215WebHandler;
+#endif
 
   STS3215Servo *find_servo_(uint8_t servo_id);
   bool read_register_(uint8_t, uint8_t, uint8_t *, uint8_t);
@@ -447,6 +459,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool id_write_attempted_{false};
   text_sensor::TextSensor *id_status_sensor_{nullptr};
   sensor::Sensor *current_id_sensor_{nullptr};
+#ifdef USE_STS3215_WEB_UI
+  STS3215WebHandler *web_handler_{nullptr};
+#endif
 };
 
 template<typename... Ts> class STS3215StepAction : public Action<Ts...>, public Parented<STS3215Component> {

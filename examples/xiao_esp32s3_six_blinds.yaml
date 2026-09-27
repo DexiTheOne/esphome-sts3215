@@ -75,6 +75,7 @@ uart:
 
 sts3215:
   id: blind_servo_bus
+  web_ui: true
   uart_id: servo_uart
   update_interval: 500ms
   # Every individual and group-cover command uses this one bus-wide queue.

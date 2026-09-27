@@ -3,8 +3,10 @@ import zlib
 from esphome import automation
 import esphome.codegen as cg
 from esphome.components import binary_sensor, button, cover, number, select, sensor, text_sensor, uart
+from esphome.components.web_server_base import CONF_WEB_SERVER_BASE_ID
 from esphome import pins
 import esphome.config_validation as cv
+from esphome.core import CORE
 from esphome.const import (
     CONF_ID, CONF_INVERTED, DEVICE_CLASS_CURRENT, DEVICE_CLASS_TEMPERATURE,
     DEVICE_CLASS_VOLTAGE, ENTITY_CATEGORY_CONFIG, ENTITY_CATEGORY_DIAGNOSTIC,
@@ -71,6 +73,7 @@ CONF_CURRENT_ID = "current_id"
 CONF_NEW_ID = "new_id"
 CONF_SET_ID = "set_id"
 CONF_IDENTIFY = "identify"
+CONF_WEB_UI = "web_ui"
 
 sts3215_ns = cg.esphome_ns.namespace("sts3215")
 STS3215Component = sts3215_ns.class_("STS3215Component", cg.PollingComponent, uart.UARTDevice)
@@ -222,6 +225,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_POWER_ON_DELAY, default="1s"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_POWER_OFF_DELAY, default="5s"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_UART_TRACE, default=True): cv.boolean,
+        cv.Optional(CONF_WEB_UI): cv.All(cv.boolean, cv.requires_component("web_server"), cv.only_on_esp32),
     }).extend(uart.UART_DEVICE_SCHEMA).extend(cv.polling_component_schema("500ms")),
     _unique_servo_ids,
 )
@@ -250,6 +254,10 @@ async def to_code(config):
     cg.add(var.set_power_on_delay(config[CONF_POWER_ON_DELAY].total_milliseconds))
     cg.add(var.set_power_off_delay(config[CONF_POWER_OFF_DELAY].total_milliseconds))
     cg.add(var.set_uart_trace(config[CONF_UART_TRACE]))
+    if config.get(CONF_WEB_UI):
+        base = await cg.get_variable(CORE.config["web_server"][CONF_WEB_SERVER_BASE_ID])
+        cg.add_define("USE_STS3215_WEB_UI")
+        cg.add(var.register_web_ui(base))
     if CONF_POWER_PIN in config:
         pin = await cg.gpio_pin_expression(config[CONF_POWER_PIN])
         cg.add(var.set_power_pin(pin))

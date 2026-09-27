@@ -7,10 +7,11 @@ configuration at `http://10.0.0.110/`.
 Each individual blind and **All Blinds** remain native API covers for Home
 Assistant. The motor telemetry, settings, and calibration entities have
 `internal: true`, so the native API does not advertise them. The web server's
-`include_internal: true` displays them on the device page. The web page also
-shows the covers. Version 3 sorting groups put **All Blinds** in its own box
-and each blind's cover, readings, settings, and calibration controls in a
-separate box. The boxes follow the listed blind order.
+`include_internal: true` makes them available through its local HTTP API.
+`web_ui: true` serves the component's self-contained blind dashboard at `/`.
+It shows **All Blinds** and a card for each motor, with a normalized vertical
+encoder bar, jog and calibration controls, cover tilt, diagnostics, and saved
+settings.
 
 ```yaml
 web_server:
@@ -28,6 +29,7 @@ web_server:
   ota: false
 
 sts3215:
+  web_ui: true
   servos:
     - servo_id: 6
       cover:
@@ -52,6 +54,16 @@ sts3215:
 require internet access. Native ESPHome OTA remains enabled by the separate
 `ota: - platform: esphome` block. The web server does not expose firmware
 uploads.
+
+The bar maps the saved down and up encoder points to its bottom and top. Current
+position is blue fill clamped to that range. Green lines mark measured saved
+points, blue lines mark calculated midpoint and active move target, and red
+marks the servo's logical zero. For incomplete calibration, the bar uses the
+available points plus the current reading with a minimum display span. The
+right column shows saved encoder points and command targets for down, middle,
+and up. The top button starts auto calibration; the controls to the left handle
+jogging and manual point capture. Reset unlocks manual calibration. Direction
+is below the bar.
 
 The component saves per-motor speed, acceleration, torque limit, jog increment,
 direction choice, calibration points, and last logical position in ESP32 flash.
