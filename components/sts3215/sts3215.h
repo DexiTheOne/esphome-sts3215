@@ -323,6 +323,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void invalidate_telemetry_();
   void poll_servo_(STS3215Servo &servo);
   void process_auto_calibration_();
+  bool read_auto_encoder_(STS3215Servo &servo, int32_t &encoder);
   void finish_auto_calibration_(bool success);
   void start_auto_step_(STS3215Servo &servo);
   void begin_move_(STS3215Servo &servo, int32_t target_raw);
@@ -374,6 +375,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   uint8_t auto_servo_id_{0};
   int8_t auto_direction_{-1};
   int32_t auto_target_{0}, auto_first_endpoint_{0};
+  int32_t auto_encoder_{0};
   uint32_t auto_started_{0}, auto_phase_started_{0}, auto_last_poll_{0};
   STS3215GroupCover *group_cover_{nullptr};
   uint32_t response_timeout_ms_{50};

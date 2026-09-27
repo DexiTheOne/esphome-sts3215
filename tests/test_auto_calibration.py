@@ -10,7 +10,7 @@ from test_id_provisioning import ROOT, function
 def main():
     source = (ROOT / "components/sts3215/sts3215.cpp").read_text()
     runtime = "\n".join(function(source, name) for name in (
-        "start_auto_step_", "process_auto_calibration_", "finish_auto_calibration_"))
+        "read_auto_encoder_", "start_auto_step_", "process_auto_calibration_", "finish_auto_calibration_"))
     harness = r'''
 #include <algorithm>
 #include <cassert>
@@ -22,10 +22,11 @@ def main():
 #define YESNO(x) (x)
 uint32_t clock_ms=0;
 uint32_t millis() { return clock_ms; }
+void delay(uint32_t value) { clock_ms+=value; }
 struct Sensor { void publish_state(float) {} };
 struct STS3215Servo {
   uint8_t id=6, max_acceleration=254, acceleration_raw=20, calibration_mask=0;
-  bool inverted=false, moving=false, has_position=true, negative_is_down=true;
+  bool inverted=false, moving=false, has_position=true, negative_is_down=true, mode_ready=true;
   bool calibration_error=false, calibration_unlocked=true;
   int32_t position_raw=0, hardware_position_raw=0, target_raw=0;
   int32_t calibration_down=0, calibration_up=0, calibration_middle=0;
@@ -39,14 +40,17 @@ struct STS3215Component {
   uint8_t auto_servo_id_=6;
   int8_t auto_direction_=-1;
   int32_t auto_target_=0, auto_first_endpoint_=0;
+  int32_t auto_encoder_=2000, physical_encoder=2000;
   uint32_t auto_started_=0, auto_phase_started_=0, auto_last_poll_=0, move_timeout_ms_=120000;
   static constexpr uint8_t REG_TORQUE_ENABLE=40, REG_TORQUE_LIMIT=48;
   static constexpr uint8_t REG_ACCELERATION=41, REG_GOAL_SPEED=46, REG_PRESENT_POSITION=56;
+  static constexpr uint8_t REG_MODE=33, REG_EEPROM_LOCK=55;
   STS3215Servo servo;
   std::vector<Write> writes;
   int32_t residual=0;
   bool physical_moving=false, healthy=true;
   uint8_t fault=0, torque=1;
+  uint8_t mode=3, eeprom_lock=1;
   uint16_t torque_limit=300;
   int read_count=0, save_count=0;
   STS3215Servo *find_servo_(uint8_t id) { return id==servo.id ? &servo : nullptr; }
@@ -60,7 +64,9 @@ struct STS3215Component {
     writes.push_back({reg,{p,p+size}});
     if (reg==40) torque=p[0];
     if (reg==48) torque_limit=p[0]|p[1]<<8;
-    assert(reg>=40); // No EEPROM register may be written.
+    if (reg==33) { assert(torque==0 && eeprom_lock==1); mode=p[0]; }
+    assert(reg>=40 || reg==33); // Mode writes require locked EEPROM and torque off.
+    assert(reg!=55); // Never unlock EEPROM.
     return true;
   }
   bool read_register_(uint8_t, uint8_t reg, uint8_t *p, uint8_t size) {
@@ -69,8 +75,10 @@ struct STS3215Component {
     std::fill(p,p+size,0);
     if (reg==40) p[0]=torque;
     if (reg==48) { p[0]=torque_limit; p[1]=torque_limit>>8; }
+    if (reg==33) p[0]=mode;
+    if (reg==55) p[0]=eeprom_lock;
     if (reg==56) {
-      uint16_t r=encode_signed_(residual);
+      uint16_t r=encode_signed_(mode==0 ? physical_encoder : residual);
       p[0]=r; p[1]=r>>8; p[9]=fault; p[10]=physical_moving;
     }
     return true;
@@ -80,6 +88,7 @@ struct STS3215Component {
   void update_cover_(STS3215Servo &) {}
   void update_group_cover_() {}
   void start_auto_step_(STS3215Servo &);
+  bool read_auto_encoder_(STS3215Servo &, int32_t &);
   void process_auto_calibration_();
   void finish_auto_calibration_(bool);
   void advance(uint32_t dt) { clock_ms+=dt; process_auto_calibration_(); }
@@ -94,6 +103,9 @@ void step_and_settle(STS3215Component &c, int32_t settled_residual) {
   c.residual=settled_residual;
   c.advance(999);
   assert(c.read_count==reads && c.servo.position_raw==previous_position);
+  const int delta=c.degrees_to_raw_(10.0f*c.auto_direction_,c.servo.inverted);
+  c.physical_encoder=(c.physical_encoder+delta-settled_residual+4096)%4096;
+  c.residual=0; // Real Mode 3 clears feedback after torque is released.
   c.advance(1);
 }
 int main() {
@@ -115,6 +127,7 @@ int main() {
     assert(c.servo.position_raw==-74*sign && c.auto_state_==c.AUTO_MOVE);
     step_and_settle(c,20*sign);
     assert(c.auto_state_==c.AUTO_IDLE && c.torque==0);
+    assert(c.mode==3 && c.eeprom_lock==1);
     assert(c.servo.calibration_mask==7 && !c.servo.calibration_unlocked && !c.servo.calibration_error);
     assert(c.servo.position_raw==20*sign);
     assert(c.servo.calibration_down==(negative_down ? -188 : 20)*sign);
@@ -152,6 +165,15 @@ int main() {
     clock_ms=0; STS3215Component c; c.servo.position_raw=-32700;
     c.start_auto_step_(c.servo);
     assert(c.auto_state_==c.AUTO_IDLE && c.servo.calibration_error);
+  }
+  { // Physical encoder wrapping cannot turn a full negative step into an endpoint.
+    clock_ms=0; STS3215Component c; c.auto_encoder_=c.physical_encoder=50;
+    c.start_auto_step_(c.servo); step_and_settle(c,0);
+    assert(c.servo.position_raw==-114 && c.auto_direction_==-1 && c.physical_encoder==4032);
+  }
+  { // Reject unlocked EEPROM before any mode changes or reads are attempted.
+    clock_ms=0; STS3215Component c; c.eeprom_lock=0; c.torque=0;
+    int32_t encoder=0; assert(!c.read_auto_encoder_(c.servo,encoder) && c.writes.empty());
   }
 }
 '''.replace("RUNTIME", runtime)

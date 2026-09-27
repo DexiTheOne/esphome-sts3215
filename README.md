@@ -297,6 +297,12 @@ endpoint and derives the middle halfway between both endpoints. All other
 cover positions follow the existing mapping. Normal settings are restored and
 torque stays disabled when the sequence ends.
 
+Mode 3's remaining-distance counter clears on torque release, so calibration
+briefly switches to position mode with torque off to read the physical encoder
+after settling, then restores Mode 3 before the next step. EEPROM must already
+be locked; these mode changes affect RAM only and are never saved to EEPROM.
+Single-turn encoder wraparound is tracked across the ten-degree steps.
+
 The bus must be idle to start; calibration runs one blind at a time. The shared
 power relay stays on throughout both searches, including every torque-off
 settling period. Stop on the blind or aggregate cover cancels the sequence;

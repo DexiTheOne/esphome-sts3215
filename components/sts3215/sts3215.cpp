@@ -1166,6 +1166,34 @@ void STS3215CalibrationDirectionSelect::control(const std::string &value) {
     ESP_LOGW(TAG, "Calibration direction is locked; reset calibration first");
 }
 
+bool STS3215Component::read_auto_encoder_(STS3215Servo &servo, int32_t &encoder) {
+  // Mode 3 clears the remaining-distance feedback when torque is released.
+  // Read the physical encoder in position mode, with torque off throughout.
+  // Feetech documents that writes with LOCK=1 affect RAM only. Never unlock
+  // EEPROM here; restore Mode 3 before any subsequent motor command.
+  uint8_t settings;
+  if (!read_register_(servo.id, REG_EEPROM_LOCK, &settings, 1) || settings != 1 ||
+      !read_register_(servo.id, REG_TORQUE_ENABLE, &settings, 1) || settings != 0)
+    return false;
+  const uint8_t position_mode = 0;
+  write_register_(servo.id, REG_MODE, &position_mode, 1);
+  bool success = read_register_(servo.id, REG_MODE, &settings, 1) && settings == position_mode;
+  uint8_t feedback[11];
+  if (success) {
+    delay(5);  // Allow the firmware's feedback cache to reflect the mode change.
+    success = read_register_(servo.id, REG_PRESENT_POSITION, feedback, sizeof(feedback)) &&
+              feedback[9] == 0 && feedback[10] == 0;
+  }
+  const uint8_t step_mode = 3;
+  write_register_(servo.id, REG_MODE, &step_mode, 1);
+  const bool restored = read_register_(servo.id, REG_MODE, &settings, 1) && settings == step_mode;
+  servo.mode_ready = restored;
+  if (!success || !restored) return false;
+  const int32_t raw = decode_signed_(decode_u16_(feedback), 15);
+  encoder = ((raw % 4096) + 4096) % 4096;
+  return true;
+}
+
 void STS3215Component::start_auto_step_(STS3215Servo &servo) {
   const int32_t delta = degrees_to_raw_(10.0f * auto_direction_, servo.inverted);
   auto_target_ = servo.position_raw + delta;
@@ -1236,11 +1264,20 @@ void STS3215Component::process_auto_calibration_() {
     auto_phase_started_ = millis();
     return;
   }
-  // Phase bit 4 makes Mode 3 feedback the signed remaining distance. It
-  // continues to describe displacement relative to the last commanded target.
-  const int32_t remaining = decode_signed_(decode_u16_(&feedback[0]), 15);
-  servo->hardware_position_raw = remaining;
-  servo->position_raw = auto_target_ - remaining;
+  int32_t encoder;
+  if (!read_auto_encoder_(*servo, encoder)) {
+    ESP_LOGW(TAG, "Servo %u cannot read the settled physical encoder", servo->id);
+    finish_auto_calibration_(false);
+    return;
+  }
+  // Each commanded step is only ten degrees, so the nearest single-turn
+  // encoder difference unambiguously handles wraparound in either direction.
+  int32_t traveled = encoder - auto_encoder_;
+  if (traveled > 2048) traveled -= 4096;
+  if (traveled < -2048) traveled += 4096;
+  auto_encoder_ = encoder;
+  const int32_t remaining = auto_target_ - (servo->position_raw + traveled);
+  servo->position_raw += traveled;
   servo->has_position = true;
   if (servo->position_sensor != nullptr)
     servo->position_sensor->publish_state(raw_to_degrees_(servo->position_raw, servo->inverted));
@@ -1250,9 +1287,9 @@ void STS3215Component::process_auto_calibration_() {
   // encoder quantization. Never use the requested target as an endpoint.
   const int32_t delta = degrees_to_raw_(10.0f * auto_direction_, servo->inverted);
   const bool endpoint = (delta > 0 ? remaining : -remaining) > 5;
-  ESP_LOGI(TAG, "Servo %u auto calibration settled: target=%ld actual=%ld remaining=%ld endpoint=%s",
+  ESP_LOGI(TAG, "Servo %u auto calibration settled: target=%ld actual=%ld remaining=%ld encoder=%ld endpoint=%s",
            servo->id, static_cast<long>(auto_target_), static_cast<long>(servo->position_raw),
-           static_cast<long>(remaining), YESNO(endpoint));
+           static_cast<long>(remaining), static_cast<long>(encoder), YESNO(endpoint));
   if (endpoint && auto_direction_ < 0) {
     auto_first_endpoint_ = servo->position_raw;
     auto_direction_ = 1;
@@ -1355,6 +1392,12 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     servo->calibration_mask = 0;
     save_preferences_(*servo);
     auto_state_ = AUTO_MOVE;
+    const uint8_t disabled = 0;
+    write_register_(servo_id, REG_TORQUE_ENABLE, &disabled, 1);
+    if (!read_auto_encoder_(*servo, auto_encoder_)) {
+      finish_auto_calibration_(false);
+      return;
+    }
     // Only volatile RAM registers are changed, leaving user settings intact.
     const uint8_t torque[] = {250, 0};
     write_register_(servo_id, REG_TORQUE_LIMIT, torque, sizeof(torque));
