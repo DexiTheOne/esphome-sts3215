@@ -200,6 +200,12 @@ struct STS3215Servo {
   bool moving{false};
   bool moving_seen{false};
   bool command_active{false};
+  bool overextend{false};
+  bool overextend_failed{false};
+  uint8_t overextend_state{0};  // 1: tug, 2: torque-free settling
+  int32_t overextend_endpoint{0};
+  int32_t overextend_encoder{0};
+  uint32_t overextend_released{0};
   uint32_t active_batch{0};
   uint32_t command_started{0};
   uint32_t last_motion_poll{0};
@@ -246,6 +252,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void set_position_tolerance(uint16_t value) { position_tolerance_ = value; }
   void set_power_pin(GPIOPin *pin) { power_pin_ = pin; }
   void set_power_on_delay(uint32_t value) { power_on_delay_ms_ = value; }
+  void set_overextend(uint8_t id, bool enabled) { auto *servo = find_servo_(id); if (servo != nullptr) servo->overextend = enabled; }
+  void process_overextend_(STS3215Servo &servo);
   void set_power_off_delay(uint32_t value) { power_off_delay_ms_ = value; }
   void set_uart_trace(bool value) { uart_trace_ = value; }
   void add_servo(uint8_t servo_id, bool inverted, uint32_t preference_key,

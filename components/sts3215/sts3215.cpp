@@ -258,7 +258,7 @@ void STS3215Component::loop() {
   // delay applies only when starting a different motor, which is what limits
   // the multi-blind startup surge.
   if (servo->command_active) return;
-  if (power_pin_ != nullptr && !servo->mode_ready) {
+  if (servo->overextend_failed || (power_pin_ != nullptr && !servo->mode_ready)) {
     ESP_LOGW(TAG, "Servo %u is unavailable or not commissioned for mode 3; move discarded", servo->id);
     move_queue_.erase(next);
     update_cover_(*servo);
@@ -572,6 +572,7 @@ bool STS3215Component::write_register_(uint8_t servo_id, uint8_t address,
 }
 
 void STS3215Component::poll_servo_(STS3215Servo &servo) {
+  if (servo.overextend_state == 2) { process_overextend_(servo); return; }
   servo.last_motion_poll = millis();
   uint8_t settings[10];
   if (read_register_(servo.id, REG_TORQUE_ENABLE, settings, sizeof(settings))) {
@@ -632,7 +633,7 @@ void STS3215Component::poll_servo_(STS3215Servo &servo) {
     if (elapsed >= 5000 && !servo.moving_seen && !arrived) {
       ESP_LOGW(TAG, "Servo %u did not begin moving within 5 s; clearing queued moves", servo.id);
       remove_queued_(servo.id);
-      finish_move_(servo, false);
+      finish_move_(servo, true);
     } else if ((elapsed >= 250 && arrived) || stopped_after_motion || elapsed >= move_timeout_ms_)
       finish_move_(servo, elapsed >= move_timeout_ms_ && !arrived);
   }
@@ -671,8 +672,44 @@ void STS3215Component::begin_move_(STS3215Servo &servo, int32_t target_raw) {
 }
 
 void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
+  // Tug only a final calibrated endpoint, never an intermediate gravity leg.
+  const bool final_leg = std::none_of(move_queue_.begin(), move_queue_.end(),
+      [&servo](const STS3215QueuedMove &move) { return move.servo_id == servo.id; });
+  if (!timed_out && servo.overextend && servo.overextend_state == 0 && final_leg &&
+      calibrated_(servo) && std::abs(servo.position_raw - servo.target_raw) <= position_tolerance_ &&
+      (servo.target_raw == servo.calibration_down || servo.target_raw == servo.calibration_up)) {
+    int32_t encoder;
+    const uint8_t disabled = 0;
+    write_register_(servo.id, REG_TORQUE_ENABLE, &disabled, 1);
+    if (read_auto_encoder_(servo, encoder)) {
+      servo.overextend_endpoint = servo.target_raw;
+      servo.overextend_encoder = encoder;
+      servo.overextend_state = 1;
+      const uint16_t limit = std::min<uint16_t>(servo.torque_limit_raw, 250);
+      const uint8_t torque[] = {static_cast<uint8_t>(limit), static_cast<uint8_t>(limit >> 8)};
+      write_register_(servo.id, REG_TORQUE_LIMIT, torque, 2);
+      uint8_t accepted[2];
+      if (read_register_(servo.id, REG_TORQUE_LIMIT, accepted, 2) && decode_u16_(accepted) == limit) {
+        const int32_t outward = servo.target_raw == servo.calibration_down ?
+            servo.calibration_down - servo.calibration_middle : servo.calibration_up - servo.calibration_middle;
+        begin_move_(servo, servo.position_raw + (outward > 0 ? 228 : -228));
+        ESP_LOGI(TAG, "Servo %u endpoint overextend: 20 degrees at %.1f%% torque", servo.id, limit / 10.0f);
+        return;
+      }
+      timed_out = true;
+    } else {
+      ESP_LOGW(TAG, "Servo %u overextend skipped: physical encoder unavailable", servo.id);
+    }
+  }
   const uint8_t disabled = 0;
   write_register_(servo.id, REG_TORQUE_ENABLE, &disabled, 1);
+  if (servo.overextend_state == 1) {
+    servo.overextend_state = 2;
+    servo.overextend_released = millis();
+    servo.moving_seen = false;
+    if (servo.torque_sensor != nullptr) servo.torque_sensor->publish_state(false);
+    return;  // Keep command_active true through settling to hold power and the ripple batch.
+  }
   servo.command_active = false;
   servo.moving_seen = false;
   ESP_LOGD(TAG, "Servo %u move finished at raw %ld (target %ld); %u queued move(s) remain",
@@ -684,6 +721,34 @@ void STS3215Component::finish_move_(STS3215Servo &servo, bool timed_out) {
     ESP_LOGW(TAG, "Servo %u move timed out; torque disabled", servo.id);
   if (servo.has_position)
     save_preferences_(servo);
+  update_cover_(servo);
+}
+
+void STS3215Component::process_overextend_(STS3215Servo &servo) {
+  if (static_cast<uint32_t>(millis() - servo.overextend_released) < 1000) return;
+  int32_t encoder;
+  if (read_auto_encoder_(servo, encoder)) {
+    int32_t delta = encoder - servo.overextend_encoder;
+    if (delta > 2048) delta -= 4096;
+    if (delta < -2048) delta += 4096;
+    servo.position_raw = servo.overextend_endpoint + delta;
+    ESP_LOGI(TAG, "Servo %u overextend settled: endpoint=%ld actual=%ld offset=%ld", servo.id,
+             static_cast<long>(servo.overextend_endpoint), static_cast<long>(servo.position_raw),
+             static_cast<long>(delta));
+    servo.target_raw = servo.position_raw;
+  } else {
+    servo.mode_ready = false;
+    servo.overextend_failed = true;  // Keep motion blocked even across motor supply cycles.
+    remove_queued_(servo.id);
+    ESP_LOGE(TAG, "Servo %u overextend encoder read failed; motion blocked; encoder recovery required", servo.id);
+  }
+  const uint8_t torque[] = {static_cast<uint8_t>(servo.torque_limit_raw),
+                            static_cast<uint8_t>(servo.torque_limit_raw >> 8)};
+  write_register_(servo.id, REG_TORQUE_LIMIT, torque, 2);
+  servo.overextend_state = 0;
+  servo.command_active = false;
+  servo.moving = false;
+  if (!servo.overextend_failed) save_preferences_(servo);
   update_cover_(servo);
 }
 
@@ -711,7 +776,7 @@ void STS3215Component::enqueue_cover_sequence_(uint8_t servo_id, int32_t interme
 
 bool STS3215Component::pending_target_(const STS3215Servo &servo, int32_t &target_raw) const {
   bool pending = servo.command_active;
-  target_raw = pending ? servo.target_raw : servo.position_raw;
+  target_raw = pending ? (servo.overextend_state != 0 ? servo.overextend_endpoint : servo.target_raw) : servo.position_raw;
   const auto queued = std::find_if(move_queue_.rbegin(), move_queue_.rend(),
       [&servo](const STS3215QueuedMove &move) { return move.servo_id == servo.id; });
   if (queued != move_queue_.rend()) {
@@ -1631,8 +1696,8 @@ void STS3215Component::stop_servo(uint8_t servo_id) {
   ESP_LOGW(TAG, "Servo %u stop requested; active=%s, %u queued move(s)", servo_id,
            YESNO(servo->command_active), static_cast<unsigned>(move_queue_.size()));
   remove_queued_(servo_id);
-  if (servo->command_active)
-    finish_move_(*servo, false);
+  if (servo->command_active && servo->overextend_state != 2)
+    finish_move_(*servo, true);
   update_cover_(*servo);
 }
 
@@ -1642,8 +1707,8 @@ void STS3215Component::stop_all() {
   if (auto_state_ != AUTO_IDLE) finish_auto_calibration_(false);
   move_queue_.clear();
   for (auto &servo : servos_)
-    if (servo.command_active)
-      finish_move_(servo, false);
+    if (servo.command_active && servo.overextend_state != 2)
+      finish_move_(servo, true);
 }
 
 void STS3215Component::load_preferences_(STS3215Servo &servo) {

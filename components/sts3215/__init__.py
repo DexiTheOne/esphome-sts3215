@@ -57,6 +57,7 @@ CONF_INITIAL_SPEED = "initial_speed"
 CONF_INITIAL_ACCELERATION = "initial_acceleration"
 CONF_MAX_ACCELERATION = "max_acceleration"
 CONF_INITIAL_TORQUE_LIMIT = "initial_torque_limit"
+CONF_OVEREXTEND = "overextend"
 CONF_GRAVITY_RETURN_TO_ZERO = "gravity_return_to_zero"
 CONF_MULTI_TURN_MODE = "multi_turn_mode"
 CONF_PRESETS = "presets"
@@ -147,6 +148,7 @@ SERVO_SCHEMA = cv.Schema({
     cv.Optional(CONF_MAX_ACCELERATION, default=254): cv.int_range(min=0, max=254),
     cv.Optional(CONF_INITIAL_TORQUE_LIMIT, default=30.0): cv.float_range(min=0, max=100),
     cv.Optional(CONF_GRAVITY_RETURN_TO_ZERO, default=False): cv.boolean,
+    cv.Optional(CONF_OVEREXTEND, default=False): cv.boolean,
     cv.Optional(CONF_POSITION): sensor.sensor_schema(
         unit_of_measurement=UNIT_DEGREES, accuracy_decimals=1,
         state_class=STATE_CLASS_MEASUREMENT, icon="mdi:angle-acute"),
@@ -277,6 +279,7 @@ async def to_code(config):
             servo_config[CONF_INITIAL_SPEED], servo_config[CONF_INITIAL_ACCELERATION],
             servo_config[CONF_INITIAL_TORQUE_LIMIT], servo_config[CONF_GRAVITY_RETURN_TO_ZERO],
             servo_config[CONF_MAX_ACCELERATION]))
+        cg.add(var.set_overextend(servo_id, servo_config[CONF_OVEREXTEND]))
 
         for key, setter in (
             (CONF_POSITION, "set_position_sensor"), (CONF_POSITION_RAW, "set_position_raw_sensor"),

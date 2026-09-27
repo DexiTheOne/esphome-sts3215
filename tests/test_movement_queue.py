@@ -27,12 +27,13 @@ uint32_t now_ms = 0;
 uint32_t millis() { return now_ms; }
 struct STS3215Servo {
   uint8_t id;
-  bool command_active=false, mode_ready=true;
+  bool command_active=false, mode_ready=true, overextend_failed=false;
   int32_t position_raw=0;
   uint32_t active_batch=0;
   bool calibrated=true;
   bool gravity_return_to_zero=false;
-  int32_t target_raw=0;
+  int32_t target_raw=0, overextend_endpoint=0;
+  uint8_t overextend_state=0;
   struct Cover { void update_from_parent(float,float,int) {} } *cover=nullptr;
 };
 struct STS3215QueuedMove { uint8_t servo_id; int32_t target_raw; uint32_t batch=0; bool batch_started=false; };
