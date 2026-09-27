@@ -380,6 +380,25 @@ received at nearly the same time cannot start all motors together. The main
 cover queues calibrated servos in their `servos:` list order and reports their
 average tilt and openness. The delay applies when starting different motors;
 successive commands for one motor begin as soon as its active move completes.
+The default `movement_mode: staggered` preserves queue order, so a blind's
+buffered gravity-return steps can hold up later blinds. Choose `overlapping`
+to let the next available blind start while previous blinds are still moving:
+
+```yaml
+sts3215:
+  movement_mode: overlapping
+  start_delay: 2s
+  # Keep your existing main_cover and servos configuration here.
+```
+
+The delay is measured from the previous motor's movement command, not its
+completion or the group request. With a 2-second delay, different motors can
+start at approximately 0, 2, and 4 seconds, even during a gravity-return
+sequence. Each motor still completes its active step before its next step.
+Starts may be later while the bus wakes or a servo is unavailable; physical
+motion onset is not used as the timer. Overlapping movements draw power at the
+same time, so size the shared supply for the concurrent running load.
+
 Copy a servo list item and give it a unique ID to scale from one motor to six or
 more.
 

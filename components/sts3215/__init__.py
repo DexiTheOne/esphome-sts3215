@@ -37,6 +37,7 @@ CONF_DEGREES = "degrees"
 CONF_COVER = "cover"
 CONF_MAIN_COVER = "main_cover"
 CONF_START_DELAY = "start_delay"
+CONF_MOVEMENT_MODE = "movement_mode"
 CONF_MOVE_TIMEOUT = "move_timeout"
 CONF_POSITION_TOLERANCE = "position_tolerance"
 CONF_CALIBRATION = "calibration"
@@ -199,6 +200,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_SERVOS, default=[]): cv.ensure_list(SERVO_SCHEMA),
         cv.Optional(CONF_PROVISIONING): PROVISIONING_SCHEMA,
         cv.Optional(CONF_MAIN_COVER): cover.cover_schema(STS3215GroupCover, device_class="blind"),
+        cv.Optional(CONF_MOVEMENT_MODE, default="staggered"): cv.one_of("staggered", "overlapping", lower=True),
         cv.Optional(CONF_START_DELAY, default="2s"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_MOVE_TIMEOUT, default="2min"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_POSITION_TOLERANCE, default=5): cv.int_range(min=1, max=1000),
@@ -226,6 +228,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await uart.register_uart_device(var, config)
+    cg.add(var.set_overlapping(config[CONF_MOVEMENT_MODE] == "overlapping"))
     cg.add(var.set_start_delay(config[CONF_START_DELAY].total_milliseconds))
     cg.add(var.set_move_timeout(config[CONF_MOVE_TIMEOUT].total_milliseconds))
     cg.add(var.set_position_tolerance(config[CONF_POSITION_TOLERANCE]))

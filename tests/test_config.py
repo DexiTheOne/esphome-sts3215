@@ -32,6 +32,16 @@ class ConfigTests(unittest.TestCase):
         config = component.CONFIG_SCHEMA({"servos": [{"servo_id": 1}, {"servo_id": 2}]})
         self.assertEqual(len(config["servos"]), 2)
 
+    def test_movement_modes(self):
+        base = {"servos": [{"servo_id": 1}, {"servo_id": 2}]}
+        self.assertEqual(component.CONFIG_SCHEMA(base)["movement_mode"], "staggered")
+        for mode in ("staggered", "overlapping"):
+            config = component.CONFIG_SCHEMA({**base, "movement_mode": mode, "start_delay": "750ms"})
+            self.assertEqual(config["movement_mode"], mode)
+            self.assertEqual(config["start_delay"].total_milliseconds, 750)
+        with self.assertRaises(cv.Invalid):
+            component.CONFIG_SCHEMA({**base, "movement_mode": "unknown"})
+
     def test_duplicate_servo_ids(self):
         with self.assertRaises(cv.Invalid):
             component.CONFIG_SCHEMA({"servos": [{"servo_id": 1}, {"servo_id": 1}]})

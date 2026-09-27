@@ -212,10 +212,20 @@ void STS3215Component::loop() {
   if (commission_state_ != COMMISSION_IDLE || !pending_commission_ids_.empty()) return;
 
   const uint32_t now = millis();
-  const auto move = move_queue_.front();
+  auto next = move_queue_.begin();
+  if (overlapping_) {
+    // Skip a busy motor's buffered steps without changing their order. This
+    // lets the next blind start during the preceding gravity-return sequence.
+    next = std::find_if(move_queue_.begin(), move_queue_.end(), [this](const STS3215QueuedMove &candidate) {
+      const auto *candidate_servo = find_servo_(candidate.servo_id);
+      return candidate_servo == nullptr || !candidate_servo->command_active;
+    });
+    if (next == move_queue_.end()) return;
+  }
+  const auto move = *next;
   auto *servo = find_servo_(move.servo_id);
   if (servo == nullptr) {
-    move_queue_.pop_front();
+    move_queue_.erase(next);
     return;
   }
   // Never interrupt an in-flight relative command for the same servo. A
@@ -225,13 +235,13 @@ void STS3215Component::loop() {
   if (servo->command_active) return;
   if (power_pin_ != nullptr && !servo->mode_ready) {
     ESP_LOGW(TAG, "Servo %u is unavailable or not commissioned for mode 3; move discarded", servo->id);
-    move_queue_.pop_front();
+    move_queue_.erase(next);
     update_cover_(*servo);
     update_group_cover_();
     return;
   }
   if (move.target_raw == servo->position_raw) {
-    move_queue_.pop_front();
+    move_queue_.erase(next);
     ESP_LOGD(TAG, "Servo %u skipped zero-distance move; %u queued move(s) remain",
              servo->id, static_cast<unsigned>(move_queue_.size()));
     update_cover_(*servo);
@@ -242,7 +252,7 @@ void STS3215Component::loop() {
   if (has_started_move_ && !same_servo &&
       static_cast<uint32_t>(now - last_move_started_) < start_delay_ms_)
     return;
-  move_queue_.pop_front();
+  move_queue_.erase(next);
   begin_move_(*servo, move.target_raw);
 }
 
@@ -250,6 +260,7 @@ void STS3215Component::dump_config() {
   ESP_LOGCONFIG(TAG, "STS3215:");
   ESP_LOGCONFIG(TAG, "  UART packet trace: %s", YESNO(uart_trace_));
   LOG_UPDATE_INTERVAL(this);
+  ESP_LOGCONFIG(TAG, "  Movement mode: %s", overlapping_ ? "overlapping" : "staggered");
   ESP_LOGCONFIG(TAG, "  Inter-motor start delay: %u ms", static_cast<unsigned>(start_delay_ms_));
   ESP_LOGCONFIG(TAG, "  Move timeout: %u ms", static_cast<unsigned>(move_timeout_ms_));
   if (power_pin_ != nullptr) {

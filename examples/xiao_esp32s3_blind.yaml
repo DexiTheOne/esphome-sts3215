@@ -48,6 +48,8 @@ sts3215:
   update_interval: 500ms
   # Every individual and group-cover command uses this one bus-wide queue.
   # With six motors, IDs are started in the order listed below.
+  # Use overlapping to start later motors while earlier blinds are moving.
+  movement_mode: staggered
   start_delay: 2s
   move_timeout: 2min
   position_tolerance: 5

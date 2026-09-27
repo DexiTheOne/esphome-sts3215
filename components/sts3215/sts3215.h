@@ -221,6 +221,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void update() override;
   void dump_config() override;
 
+  void set_overlapping(bool value) { overlapping_ = value; }
   void set_start_delay(uint32_t value) { start_delay_ms_ = value; }
   void set_move_timeout(uint32_t value) { move_timeout_ms_ = value; }
   void set_position_tolerance(uint16_t value) { position_tolerance_ = value; }
@@ -344,6 +345,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   std::deque<std::pair<uint8_t, uint8_t>> calibration_queue_;
   STS3215GroupCover *group_cover_{nullptr};
   uint32_t response_timeout_ms_{50};
+  bool overlapping_{false};
   uint32_t start_delay_ms_{2000};
   uint32_t move_timeout_ms_{120000};
   uint16_t position_tolerance_{5};
