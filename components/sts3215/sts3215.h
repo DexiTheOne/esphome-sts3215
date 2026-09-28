@@ -169,6 +169,19 @@ struct STS3215PreferenceData {
   uint8_t reserved;
 };
 
+struct STS3215QuarterPreferenceData {
+  uint32_t version;
+  int32_t quarter;
+  int32_t three_quarter;
+  uint8_t manual_mask;
+};
+
+struct STS3215StartupForcePreferenceData {
+  uint32_t version;
+  uint16_t raw;
+  uint16_t reserved;
+};
+
 struct STS3215Servo {
   uint8_t id;
   bool inverted;
@@ -190,6 +203,9 @@ struct STS3215Servo {
   uint16_t speed_limit_raw{0};
   uint8_t acceleration_raw{0};
   uint16_t torque_limit_raw{0};
+  uint16_t startup_force_raw{0};
+  bool startup_force_set{false};
+  ESPPreferenceObject startup_force_preference;
   uint16_t auto_torque_limit_raw{250};
   float speed_limit_display{0.0f};
   float torque_limit_display{0.0f};
@@ -203,6 +219,10 @@ struct STS3215Servo {
   bool edit_positions{false};
   bool middle_calculated{false};
   bool positions_manual{false};
+  int32_t calibration_quarter{0};
+  int32_t calibration_three_quarter{0};
+  uint8_t quarter_manual_mask{0};
+  ESPPreferenceObject quarter_preference;
   bool calibration_error{false};
   bool negative_is_down{true};
   ESPPreferenceObject direction_preference;
@@ -298,6 +318,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool set_acceleration(uint8_t servo_id, float value);
   bool set_torque_limit(uint8_t servo_id, float percent);
   bool set_jog_increment(uint8_t servo_id, float degrees);
+  bool set_startup_force(uint8_t servo_id, int32_t percent);
   void commission_step_mode(uint8_t servo_id);
   void set_servo_id(int32_t current_id, int32_t new_id);
   void set_selected_id(uint8_t value) { selected_new_id_ = value; }
@@ -308,7 +329,8 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   void calibration_action(uint8_t servo_id, uint8_t action);
   bool set_manual_control(uint8_t servo_id, bool enabled);
   bool set_edit_positions(uint8_t servo_id, bool enabled);
-  bool set_manual_positions(uint8_t servo_id, int32_t down, int32_t middle, int32_t up);
+  bool set_manual_positions(uint8_t servo_id, int32_t down, int32_t quarter, int32_t middle,
+                            int32_t three_quarter, int32_t up);
   void set_auto_calibration_torque_limit(uint8_t id, uint16_t value);
   void set_calibration_direction_select(uint8_t id, STS3215CalibrationDirectionSelect *value);
   bool set_calibration_direction(uint8_t id, bool negative_is_down);
@@ -331,6 +353,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   static constexpr uint8_t REG_TORQUE_ENABLE = 40;
   static constexpr uint8_t REG_MODE = 33;
   static constexpr uint8_t REG_ACCELERATION = 41;
+  static constexpr uint8_t REG_MIN_STARTUP_FORCE = 24;
   static constexpr uint8_t REG_GOAL_SPEED = 46;
   static constexpr uint8_t REG_TORQUE_LIMIT = 48;
   static constexpr uint8_t REG_EEPROM_LOCK = 55;
@@ -389,6 +412,9 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
                          (span < 0 && middle < 0 && middle > span));
   }
   int32_t raw_for_cover_position_(const STS3215Servo &servo, float position) const;
+  int32_t quarter_raw_(const STS3215Servo &servo, bool upper) const;
+  void save_quarter_preferences_(STS3215Servo &servo);
+  bool apply_startup_force_(STS3215Servo &servo);
   float cover_position_for_raw_(const STS3215Servo &servo, int32_t raw) const;
 
   static uint16_t decode_u16_(const uint8_t *data);

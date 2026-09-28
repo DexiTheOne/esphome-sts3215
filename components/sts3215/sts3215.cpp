@@ -46,6 +46,22 @@ void STS3215Component::setup() {
   for (auto &servo : servos_) {
     servo.preference = global_preferences->make_preference<STS3215PreferenceData>(servo.preference_key);
     load_preferences_(servo);
+    servo.quarter_preference = global_preferences->make_preference<STS3215QuarterPreferenceData>(
+        servo.preference_key ^ 0x71321525);
+    STS3215QuarterPreferenceData quarter_data{};
+    if (servo.quarter_preference.load(&quarter_data) && quarter_data.version == 1 &&
+        (quarter_data.manual_mask & ~0x03) == 0) {
+      servo.calibration_quarter = quarter_data.quarter;
+      servo.calibration_three_quarter = quarter_data.three_quarter;
+      servo.quarter_manual_mask = quarter_data.manual_mask;
+    }
+    servo.startup_force_preference = global_preferences->make_preference<STS3215StartupForcePreferenceData>(
+        servo.preference_key ^ 0x24532150);
+    STS3215StartupForcePreferenceData force_data{};
+    if (servo.startup_force_preference.load(&force_data) && force_data.version == 1 && force_data.raw <= 1000) {
+      servo.startup_force_raw = force_data.raw;
+      servo.startup_force_set = true;
+    }
     servo.endpoint_preference = global_preferences->make_preference<int8_t>(servo.preference_key ^ 0xEC321500);
     servo.endpoint_preference.load(&servo.reported_endpoint);
     if (servo.reported_endpoint < -1 || servo.reported_endpoint > 1) servo.reported_endpoint = -1;
@@ -119,6 +135,8 @@ void STS3215Component::initialize_powered_bus_() {
     write_register_(servo.id, REG_ACCELERATION, &acceleration, 1);
     write_register_(servo.id, REG_GOAL_SPEED, speed, 2);
     write_register_(servo.id, REG_TORQUE_LIMIT, torque, 2);
+    if (!apply_startup_force_(servo) && servo.startup_force_set)
+      ESP_LOGW(TAG, "Servo %u startup force could not be restored", servo.id);
     if (servo.torque_sensor != nullptr) servo.torque_sensor->publish_state(false);
     uint8_t settings[10];
     bool settings_read = false;
@@ -1456,6 +1474,8 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     servo->calibration_middle = 0;
     servo->calibration_up = 0;
     servo->calibration_mask = 0;
+    servo->quarter_manual_mask = 0;
+    save_quarter_preferences_(*servo);
     servo->middle_calculated = false;
     servo->positions_manual = false;
     servo->manual_control = true;
@@ -1490,6 +1510,8 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
     servo->calibration_error = false;
     servo->calibration_unlocked = true;
     servo->calibration_mask = 0;
+    servo->quarter_manual_mask = 0;
+    save_quarter_preferences_(*servo);
     save_preferences_(*servo);
     auto_state_ = AUTO_MOVE;
     const uint8_t disabled = 0;
@@ -1555,6 +1577,8 @@ void STS3215Component::calibration_action(uint8_t servo_id, uint8_t action) {
   if (action == 3) { servo->calibration_middle = servo->position_raw; servo->calibration_mask |= 0x02; servo->middle_calculated = false; }
   servo->positions_manual = false;
   if (action == 4) { servo->calibration_up = servo->position_raw; servo->calibration_mask |= 0x04; }
+  servo->quarter_manual_mask = 0;
+  save_quarter_preferences_(*servo);
   servo->calibration_error = false;
   const char *point_name = action == 2 ? "down" : (action == 3 ? "middle" : "up");
   ESP_LOGI(TAG, "Saved servo %u %s calibration point: raw=%ld (%.1f degrees)", servo_id,
@@ -1746,6 +1770,47 @@ bool STS3215Component::set_manual_control(uint8_t servo_id, bool enabled) {
   return true;
 }
 
+bool STS3215Component::apply_startup_force_(STS3215Servo &servo) {
+  if (!servo.startup_force_set) {
+    uint8_t current[2];
+    if (read_register_(servo.id, REG_MIN_STARTUP_FORCE, current, sizeof(current)))
+      servo.startup_force_raw = std::min<uint16_t>(decode_u16_(current), 1000);
+    return true;
+  }
+  // Address 24 is in the servo's EEPROM region. LOCK=1 is required here:
+  // the write changes the running RAM copy without wearing servo EEPROM.
+  uint8_t lock;
+  if (!read_register_(servo.id, REG_EEPROM_LOCK, &lock, 1) || lock != 1) return false;
+  const uint8_t data[] = {static_cast<uint8_t>(servo.startup_force_raw),
+                          static_cast<uint8_t>(servo.startup_force_raw >> 8)};
+  if (!write_register_(servo.id, REG_MIN_STARTUP_FORCE, data, sizeof(data))) return false;
+  uint8_t accepted[2];
+  return read_register_(servo.id, REG_MIN_STARTUP_FORCE, accepted, sizeof(accepted)) &&
+      decode_u16_(accepted) == servo.startup_force_raw;
+}
+
+bool STS3215Component::set_startup_force(uint8_t servo_id, int32_t percent) {
+  if (auto_state_ != AUTO_IDLE || percent < 0 || percent > 100) return false;
+  auto *servo = find_servo_(servo_id);
+  if (servo == nullptr || servo->command_active) return false;
+  const uint16_t previous = servo->startup_force_raw;
+  const bool was_set = servo->startup_force_set;
+  servo->startup_force_raw = static_cast<uint16_t>(percent * 10);
+  servo->startup_force_set = true;
+  if ((power_pin_ == nullptr || (power_on_ && power_ready_)) && !apply_startup_force_(*servo)) {
+    servo->startup_force_raw = previous;
+    servo->startup_force_set = was_set;
+    return false;
+  }
+  const STS3215StartupForcePreferenceData data{1, servo->startup_force_raw, 0};
+  if (!servo->startup_force_preference.save(&data)) {
+    ESP_LOGW(TAG, "Failed to save startup force for servo %u", servo_id);
+    return false;
+  }
+  global_preferences->sync();
+  return true;
+}
+
 bool STS3215Component::set_edit_positions(uint8_t servo_id, bool enabled) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr || auto_state_ != AUTO_IDLE) return false;
@@ -1753,19 +1818,25 @@ bool STS3215Component::set_edit_positions(uint8_t servo_id, bool enabled) {
   return true;
 }
 
-bool STS3215Component::set_manual_positions(uint8_t servo_id, int32_t down, int32_t middle, int32_t up) {
+bool STS3215Component::set_manual_positions(uint8_t servo_id, int32_t down, int32_t quarter,
+                                            int32_t middle, int32_t three_quarter, int32_t up) {
   auto *servo = find_servo_(servo_id);
   if (servo == nullptr || !servo->edit_positions || auto_state_ != AUTO_IDLE || servo->command_active) return false;
-  if (!((down < middle && middle < up) || (down > middle && middle > up))) return false;
+  if (!((down < quarter && quarter < middle && middle < three_quarter && three_quarter < up) ||
+        (down > quarter && quarter > middle && middle > three_quarter && three_quarter > up))) return false;
   servo->calibration_down = down;
+  servo->calibration_quarter = quarter;
   servo->calibration_middle = middle;
+  servo->calibration_three_quarter = three_quarter;
   servo->calibration_up = up;
   servo->calibration_mask = 0x07;
   servo->middle_calculated = false;
   servo->positions_manual = true;
+  servo->quarter_manual_mask = 0x03;
   servo->calibration_unlocked = false;
   servo->calibration_error = false;
   save_preferences_(*servo);
+  save_quarter_preferences_(*servo);
   publish_calibration_status_(*servo);
   update_cover_(*servo);
   update_group_cover_();
@@ -1827,6 +1898,15 @@ void STS3215Component::save_preferences_(STS3215Servo &servo) {
     global_preferences->sync();
 }
 
+void STS3215Component::save_quarter_preferences_(STS3215Servo &servo) {
+  const STS3215QuarterPreferenceData data{1, servo.calibration_quarter,
+                                          servo.calibration_three_quarter, servo.quarter_manual_mask};
+  if (!servo.quarter_preference.save(&data))
+    ESP_LOGW(TAG, "Failed to save quarter positions for servo %u", servo.id);
+  else
+    global_preferences->sync();
+}
+
 void STS3215Component::set_hardware_position_(STS3215Servo &servo, int32_t hardware_position) {
   servo.hardware_position_raw = hardware_position;
   if (!servo.has_position) {
@@ -1860,12 +1940,24 @@ void STS3215Component::publish_calibration_status_(STS3215Servo &servo) {
     servo.calibration_status_sensor->publish_state(status);
 }
 
+int32_t STS3215Component::quarter_raw_(const STS3215Servo &servo, bool upper) const {
+  const int32_t first = upper ? servo.calibration_middle : servo.calibration_down;
+  const int32_t second = upper ? servo.calibration_up : servo.calibration_middle;
+  const int32_t stored = upper ? servo.calibration_three_quarter : servo.calibration_quarter;
+  const uint8_t bit = upper ? 0x02 : 0x01;
+  if ((servo.quarter_manual_mask & bit) &&
+      ((first < stored && stored < second) || (first > stored && stored > second))) return stored;
+  return first + static_cast<int32_t>(std::lround((second - first) * 0.5f));
+}
+
 int32_t STS3215Component::raw_for_cover_position_(const STS3215Servo &servo, float position) const {
-  if (position <= 0.5f)
-    return static_cast<int32_t>(std::lround(servo.calibration_down +
-        (servo.calibration_middle - servo.calibration_down) * (position * 2.0f)));
-  return static_cast<int32_t>(std::lround(servo.calibration_middle +
-      (servo.calibration_up - servo.calibration_middle) * ((position - 0.5f) * 2.0f)));
+  const int32_t anchors[] = {servo.calibration_down, quarter_raw_(servo, false), servo.calibration_middle,
+                             quarter_raw_(servo, true), servo.calibration_up};
+  position = std::max(0.0f, std::min(1.0f, position));
+  const int segment = std::min(3, static_cast<int>(position * 4.0f));
+  const float fraction = position * 4.0f - segment;
+  return static_cast<int32_t>(std::lround(anchors[segment] +
+      (anchors[segment + 1] - anchors[segment]) * fraction));
 }
 
 float STS3215Component::cover_position_for_raw_(const STS3215Servo &servo, int32_t raw) const {
@@ -1873,16 +1965,18 @@ float STS3215Component::cover_position_for_raw_(const STS3215Servo &servo, int32
   // for Closed, so use the same tolerance at both closed endpoints.
   if (std::abs(raw - servo.calibration_down) <= position_tolerance_) return 0.0f;
   if (std::abs(raw - servo.calibration_up) <= position_tolerance_) return 1.0f;
-  const int32_t first = servo.calibration_middle - servo.calibration_down;
-  const int32_t second = servo.calibration_up - servo.calibration_middle;
-  if (first == 0 || second == 0) return 0.0f;
-  const bool before_middle = first > 0 ? raw <= servo.calibration_middle : raw >= servo.calibration_middle;
-  float result;
-  if (before_middle)
-    result = 0.5f * static_cast<float>(raw - servo.calibration_down) / static_cast<float>(first);
-  else
-    result = 0.5f + 0.5f * static_cast<float>(raw - servo.calibration_middle) / static_cast<float>(second);
-  return std::max(0.0f, std::min(1.0f, result));
+  const int32_t anchors[] = {servo.calibration_down, quarter_raw_(servo, false), servo.calibration_middle,
+                             quarter_raw_(servo, true), servo.calibration_up};
+  const bool ascending = servo.calibration_down < servo.calibration_up;
+  for (int segment = 0; segment < 4; ++segment) {
+    if ((ascending && raw <= anchors[segment + 1]) || (!ascending && raw >= anchors[segment + 1])) {
+      const int32_t span = anchors[segment + 1] - anchors[segment];
+      if (span == 0) return static_cast<float>(segment) * 0.25f;
+      return std::max(0.0f, std::min(1.0f, (segment +
+          static_cast<float>(raw - anchors[segment]) / static_cast<float>(span)) * 0.25f));
+    }
+  }
+  return 1.0f;
 }
 
 void STS3215Component::update_cover_(STS3215Servo &servo) {

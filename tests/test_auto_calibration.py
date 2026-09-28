@@ -28,6 +28,7 @@ struct STS3215Servo {
   uint8_t id=6, max_acceleration=254, acceleration_raw=20, calibration_mask=0;
   bool inverted=false, moving=false, has_position=true, negative_is_down=true, mode_ready=true;
   bool calibration_error=false, calibration_unlocked=true;
+  bool middle_calculated=false, positions_manual=false, manual_control=true;
   int32_t position_raw=0, hardware_position_raw=0, target_raw=0;
   int32_t calibration_down=0, calibration_up=0, calibration_middle=0;
   uint16_t torque_limit_raw=300, speed_limit_raw=1024;

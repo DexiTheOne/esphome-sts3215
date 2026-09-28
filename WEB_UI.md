@@ -1,6 +1,6 @@
 # Motor diagnostics and calibration page
 
-The six-blind example serves ESPHome's version 3 web page at the device's IP
+The multi-blind example serves ESPHome's version 3 web page at the device's IP
 address on port 80. The live Common Area Blinds installation uses the same
 configuration at `http://10.0.0.110/`.
 
@@ -55,27 +55,29 @@ require internet access. Native ESPHome OTA remains enabled by the separate
 `ota: - platform: esphome` block. The web server does not expose firmware
 uploads.
 
-The bar maps the saved down and up encoder points to its bottom and top. Current
-position is blue fill clamped to that range. Green lines mark measured saved
-points, blue lines mark calculated midpoint and active move target, and red
-marks the servo's logical zero. For incomplete calibration, the bar uses the
-available points plus the current reading with a minimum display span. The
-right column shows saved encoder points for down, middle, and up. A red/green
-striped line marks an endpoint that overlaps servo zero. The top button starts
-auto calibration; the controls to the left handle jogging, stopping, and point
-capture. Jog increment and output speed use degrees. Stop also cancels auto
-calibration. Direction is below the bar.
+The bar maps the saved down and up encoder points to opposite ends. Selecting
+**Negative is up** flips the entire graph, placing fully up at the bottom.
+Current position is blue fill clamped to the range. Green lines mark saved
+calibrated or manually entered points; blue lines mark calculated points. Red
+marks servo zero, and a grey line ends the blue fill at the live encoder
+position. A red/green striped line marks an endpoint that overlaps zero.
+The right column shows down, 25%, 50%, 75%, and up encoder points. For
+incomplete calibration, the bar uses available points and the current reading
+with a minimum display span. The top button starts auto calibration; the left
+controls handle jogging, stopping, and point capture. Jog increment and output
+speed use degrees. Stop also cancels auto calibration.
 
 Manual Control starts off after boot for valid calibration and on when
 calibration is absent or invalid. Turning it on permits jogging and capturing
 positions without clearing calibration. Edit Positions starts off after boot.
-It accepts whole number encoder counts for all three positions, with the middle
-strictly between the endpoints. Saving marks all three as Manual, including a
-formerly calculated midpoint. Calibration point values and their provenance
+It accepts whole number encoder counts for all five positions in monotonic
+order. Saving marks all five as Manual, including formerly calculated points.
+Calibration point values and their provenance
 persist through power cycles and OTA; the two editing toggles do not.
 
-The component saves per-motor speed, acceleration, torque limit, jog increment,
-direction choice, calibration points, and last logical position in ESP32 flash.
+The component saves per-motor speed, acceleration, startup force, torque limit,
+jog increment, direction choice, calibration points, and last logical position
+in ESP32 flash. Startup force is restored to servo RAM when motor power returns.
 The calibration status is reconstructed from those saved points at boot. An OTA
 update preserves these values as long as the servo IDs and the `sts3215` ID
 remain the same. A complete flash erase or a change to either ID resets them.

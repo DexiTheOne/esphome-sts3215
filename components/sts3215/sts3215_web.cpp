@@ -96,14 +96,23 @@ class STS3215WebHandler : public AsyncWebHandler {
           success = action == "manual" ? parent_->set_manual_control(id, enabled) :
               parent_->set_edit_positions(id, enabled);
         }
+      } else if (action == "startup_force") {
+        int32_t percent;
+        auto *value_arg = request->getParam("value");
+        if (value_arg != nullptr && parse_int(value_arg->value(), percent))
+          success = parent_->set_startup_force(id, percent);
       } else if (action == "positions") {
-        int32_t down, middle, up;
+        int32_t down, quarter, middle, three_quarter, up;
         auto *d = request->getParam("down");
+        auto *q = request->getParam("quarter");
         auto *m = request->getParam("middle");
+        auto *t = request->getParam("three_quarter");
         auto *u = request->getParam("up");
-        if (d != nullptr && m != nullptr && u != nullptr && parse_int(d->value(), down) &&
-            parse_int(m->value(), middle) && parse_int(u->value(), up))
-          success = parent_->set_manual_positions(id, down, middle, up);
+        if (d != nullptr && q != nullptr && m != nullptr && t != nullptr && u != nullptr &&
+            parse_int(d->value(), down) && parse_int(q->value(), quarter) &&
+            parse_int(m->value(), middle) && parse_int(t->value(), three_quarter) &&
+            parse_int(u->value(), up))
+          success = parent_->set_manual_positions(id, down, quarter, middle, three_quarter, up);
       }
       request->send(success ? 200 : 400, "text/plain", success ? "OK" : "Invalid or unavailable control");
       return;
@@ -124,6 +133,9 @@ class STS3215WebHandler : public AsyncWebHandler {
       append_number(json, "target", servo.has_position ? static_cast<float>(target) : NAN);
       append_int(json, "down", servo.calibration_down);
       append_int(json, "middle", servo.calibration_middle);
+      append_int(json, "quarter", parent_->quarter_raw_(servo, false));
+      append_int(json, "three_quarter", parent_->quarter_raw_(servo, true));
+      append_int(json, "quarter_manual_mask", servo.quarter_manual_mask);
       append_int(json, "up", servo.calibration_up);
       append_int(json, "mask", servo.calibration_mask);
       append_bool(json, "calibrated", parent_->calibrated_(servo));
@@ -136,10 +148,16 @@ class STS3215WebHandler : public AsyncWebHandler {
       append_bool(json, "auto_active", parent_->auto_state_ != STS3215Component::AUTO_IDLE &&
                   parent_->auto_servo_id_ == servo.id);
       append_bool(json, "moving", servo.moving || servo.command_active);
+      append_bool(json, "overextend_active", servo.overextend_state != 0);
+      append_int(json, "overextend_endpoint", servo.overextend_endpoint);
       append_bool(json, "torque_enabled", servo.torque_sensor != nullptr && servo.torque_sensor->state);
       append_number(json, "jog", servo.jog_increment);
+      append_int(json, "jog_max", 2520);
       append_number(json, "speed_limit", servo.speed_limit_display);
+      append_int(json, "speed_limit_max", 360);
       append_int(json, "acceleration", servo.acceleration_raw);
+      append_int(json, "acceleration_max", servo.max_acceleration);
+      append_int(json, "startup_force", servo.startup_force_raw / 10);
       append_number(json, "torque_limit", servo.torque_limit_display);
       append_number(json, "tilt", servo.cover != nullptr ? servo.cover->tilt : NAN);
       append_number(json, "speed", sensor_value(servo.speed_sensor));
