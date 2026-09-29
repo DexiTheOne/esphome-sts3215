@@ -79,8 +79,6 @@ void STS3215Component::setup() {
   }
   if (power_pin_ != nullptr) {
     set_bus_power_(true);  // Verify EEPROM and restore volatile settings after the motors boot.
-  } else {
-    initialize_powered_bus_();
   }
 }
 
@@ -89,6 +87,7 @@ void STS3215Component::set_bus_power_(bool on) {
   power_pin_->digital_write(on);
   power_on_ = on;
   power_ready_ = false;
+  startup_servo_index_ = 0;
   if (on) {
     power_on_at_ = millis();
     idle_timer_active_ = false;
@@ -116,9 +115,15 @@ void STS3215Component::invalidate_telemetry_() {
 
 void STS3215Component::initialize_powered_bus_() {
   clear_rx_();
-  for (auto &servo : servos_) {
+  // Process one servo per loop pass so absent motors cannot starve loopTask.
+  if (startup_servo_index_ < servos_.size()) {
+    auto &servo = servos_[startup_servo_index_++];
     bool config_read = false;
     servo.mode_ready = update_commission_state_(servo, true, &config_read);
+    if (!config_read) {
+      ESP_LOGW(TAG, "Servo %u did not respond during power-up; skipping settings restore", servo.id);
+      return;
+    }
     if (config_read && !servo.mode_ready && !servo.commission_attempted) {
       servo.commission_attempted = true;
       pending_commission_ids_.push_back(servo.id);
@@ -176,6 +181,7 @@ void STS3215Component::initialize_powered_bus_() {
     uint8_t position[2];
     if (read_register_(servo.id, REG_PRESENT_POSITION, position, sizeof(position)))
       set_hardware_position_(servo, decode_signed_(decode_u16_(position), 15));
+    return;
   }
   power_ready_ = true;
 }
@@ -188,6 +194,7 @@ void STS3215Component::loop() {
     if (power_on_ && !power_ready_) {
       if (static_cast<uint32_t>(millis() - power_on_at_) < power_on_delay_ms_) return;
       initialize_powered_bus_();
+      if (!power_ready_) return;
     }
     bool active = false;
     for (const auto &servo : servos_) active |= servo.command_active;
@@ -205,6 +212,10 @@ void STS3215Component::loop() {
     } else {
       idle_timer_active_ = false;
     }
+  }
+  if (power_pin_ == nullptr && !power_ready_) {
+    initialize_powered_bus_();
+    if (!power_ready_) return;
   }
   if (auto_state_ != AUTO_IDLE) {
     process_auto_calibration_();
@@ -344,7 +355,7 @@ void STS3215Component::update() {
   // This also restores the API state if the startup publication was missed.
   for (auto &servo : servos_)
     publish_calibration_status_(servo);
-  if (power_pin_ != nullptr && (!power_on_ || !power_ready_)) return;
+  if (!power_ready_ || (power_pin_ != nullptr && !power_on_)) return;
   for (auto &servo : servos_)
     if (auto_state_ == AUTO_IDLE || servo.id != auto_servo_id_) poll_servo_(servo);
   update_group_cover_();

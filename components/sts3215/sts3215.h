@@ -456,6 +456,7 @@ class STS3215Component : public PollingComponent, public uart::UARTDevice {
   bool idle_timer_active_{false};
   bool power_on_{false};
   bool power_ready_{false};
+  size_t startup_servo_index_{0};
   bool uart_trace_{false};
 
   enum CommissionState : uint8_t {
