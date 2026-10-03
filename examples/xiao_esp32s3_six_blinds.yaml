@@ -100,14 +100,44 @@ sensor:
     i2c_id: light_channel_1
     address: 0x10
     ambient_light:
-      name: Channel 1 Illuminance
-    update_interval: 60s
+      id: channel_1_lux
+      name: Channel 1 Lux
+    update_interval: 100ms
   - platform: veml7700
     i2c_id: light_channel_2
     address: 0x10
     ambient_light:
-      name: Channel 2 Illuminance
-    update_interval: 60s
+      id: channel_2_lux
+      name: Channel 2 Lux
+    update_interval: 100ms
+  - platform: template
+    name: Combined Lux
+    device_class: illuminance
+    state_class: measurement
+    unit_of_measurement: lx
+    accuracy_decimals: 1
+    update_interval: 100ms
+    lambda: |-
+      const float l1 = id(channel_1_lux).state;
+      const float l2 = id(channel_2_lux).state;
+      if (!isfinite(l1) || !isfinite(l2)) return NAN;
+      return (l1 + l2) / 2.0f;
+  - platform: template
+    name: Sun Angle
+    unit_of_measurement: "°"
+    state_class: measurement
+    accuracy_decimals: 1
+    update_interval: 100ms
+    lambda: |-
+      const float l1 = id(channel_1_lux).state;  // +45° above window normal
+      const float l2 = id(channel_2_lux).state;  // -45° below window normal
+      if (!isfinite(l1) || !isfinite(l2)) return NAN;
+      const float combined_lux = (l1 + l2) / 2.0f;
+      if (combined_lux < 50.0f) return NAN;
+      float d = (l1 - l2) / (l1 + l2);
+      if (d < -1.0f) d = -1.0f;
+      if (d > 1.0f) d = 1.0f;
+      return atanf(d) * 180.0f / 3.14159265f;
 
 # XIAO ESP32-S3: D6/TX = GPIO43 and D7/RX = GPIO44.
 # With the XIAO plugged into Seeed's bus-servo driver, the board routes these
