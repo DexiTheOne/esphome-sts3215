@@ -29,4 +29,6 @@ ESPHome numeric sensor publishes `NAN`, which Home Assistant displays as an
 unknown state.
 
 The two VEML7700 sensors and their Combined Lux and Sun Angle calculations
-update every 100 ms (10 Hz). BMP280 and AHT20 remain at 60-second intervals.
+update every 100 ms (10 Hz). The VEML7700 sensors use fixed 50 ms integration
+so automatic gain and integration adjustments do not delay a 100 ms polling
+cycle. BMP280 and AHT20 remain at 60-second intervals.

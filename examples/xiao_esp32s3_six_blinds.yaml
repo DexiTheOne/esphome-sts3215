@@ -97,6 +97,8 @@ sensor:
   - platform: veml7700
     i2c_id: light_channel_1
     address: 0x10
+    auto_mode: false
+    integration_time: 50ms
     ambient_light:
       id: channel_1_lux
       name: "+45° Lux"
@@ -104,6 +106,8 @@ sensor:
   - platform: veml7700
     i2c_id: light_channel_2
     address: 0x10
+    auto_mode: false
+    integration_time: 50ms
     ambient_light:
       id: channel_2_lux
       name: "-45° Lux"
