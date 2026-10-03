@@ -76,6 +76,7 @@ class STS3215WebHandler : public AsyncWebHandler {
       auto *response = request->beginResponse(
           200, "text/html; charset=utf-8", reinterpret_cast<const uint8_t *>(STS3215_DASHBOARD_HTML),
           sizeof(STS3215_DASHBOARD_HTML) - 1);
+      response->addHeader("Cache-Control", "no-store, no-cache, must-revalidate");
       request->send(response);
       return;
     }
