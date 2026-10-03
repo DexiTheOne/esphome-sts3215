@@ -1,6 +1,8 @@
 # Common-area six-blind controller
 
-The live installation configuration is `local/common-area-blinds.yaml`. Keep
+The live ESPHome configuration is `motorized-blinds.yaml`, with device name
+`himblinds` and friendly name `HIMBlinds`. Its ignored local copy is
+`local/common-area-blinds.yaml`. Keep
 its installation-specific movement settings when updating the public example
 in `examples/xiao_esp32s3_six_blinds.yaml`.
 
