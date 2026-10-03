@@ -10,10 +10,10 @@ telemetry and setup entity `internal: true` so it remains on the device web
 page without becoming a Home Assistant entity. Home Assistant should receive
 only the All Blinds and six individual cover entities plus these I²C sensors:
 
-- BMP280 temperature and pressure at `0x77` on the main bus.
-- AHT20 temperature and humidity at `0x38` on the main bus.
-- Channel 1 Lux from the VEML7700 tilted up 45° on TCA9548A channel 1.
-- Channel 2 Lux from the VEML7700 tilted down 45° on TCA9548A channel 2.
+- Pressure from the BMP280 at `0x77` on the main bus.
+- Temperature and Humidity from the AHT20 at `0x38` on the main bus.
+- +45° Lux from the VEML7700 tilted up 45° on TCA9548A channel 1.
+- -45° Lux from the VEML7700 tilted down 45° on TCA9548A channel 2.
 - Combined Lux, the average of the two channel readings.
 - Sun Angle in degrees, positive above the window normal and negative below it.
 

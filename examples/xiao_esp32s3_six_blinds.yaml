@@ -82,33 +82,31 @@ sensor:
   - platform: bmp280_i2c
     i2c_id: sensor_i2c
     address: 0x77
-    temperature:
-      name: BMP280 Temperature
     pressure:
-      name: BMP280 Pressure
+      name: Pressure
     update_interval: 60s
   - platform: aht10
     variant: AHT20
     i2c_id: sensor_i2c
     address: 0x38
     temperature:
-      name: AHT20 Temperature
+      name: Temperature
     humidity:
-      name: AHT20 Humidity
+      name: Humidity
     update_interval: 60s
   - platform: veml7700
     i2c_id: light_channel_1
     address: 0x10
     ambient_light:
       id: channel_1_lux
-      name: Channel 1 Lux
+      name: "+45° Lux"
     update_interval: 100ms
   - platform: veml7700
     i2c_id: light_channel_2
     address: 0x10
     ambient_light:
       id: channel_2_lux
-      name: Channel 2 Lux
+      name: "-45° Lux"
     update_interval: 100ms
   - platform: template
     name: Combined Lux
@@ -120,7 +118,7 @@ sensor:
     lambda: |-
       const float l1 = id(channel_1_lux).state;
       const float l2 = id(channel_2_lux).state;
-      if (!isfinite(l1) || !isfinite(l2)) return NAN;
+      if (!std::isfinite(l1) || !std::isfinite(l2)) return NAN;
       return (l1 + l2) / 2.0f;
   - platform: template
     name: Sun Angle
@@ -131,7 +129,7 @@ sensor:
     lambda: |-
       const float l1 = id(channel_1_lux).state;  // +45° above window normal
       const float l2 = id(channel_2_lux).state;  // -45° below window normal
-      if (!isfinite(l1) || !isfinite(l2)) return NAN;
+      if (!std::isfinite(l1) || !std::isfinite(l2)) return NAN;
       const float combined_lux = (l1 + l2) / 2.0f;
       if (combined_lux < 50.0f) return NAN;
       float d = (l1 - l2) / (l1 + l2);
