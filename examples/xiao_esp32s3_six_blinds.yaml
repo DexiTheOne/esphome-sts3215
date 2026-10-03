@@ -60,6 +60,55 @@ external_components:
     refresh: always
     components: [sts3215]
 
+# XIAO D4/SDA = GPIO5 and D5/SCL = GPIO6.
+i2c:
+  id: sensor_i2c
+  sda: GPIO5
+  scl: GPIO6
+  scan: true
+
+# All TCA9548A address pins grounded: 0x70. Each light sensor is 0x10.
+tca9548a:
+  - id: light_mux
+    address: 0x70
+    i2c_id: sensor_i2c
+    channels:
+      - bus_id: light_channel_1
+        channel: 1
+      - bus_id: light_channel_2
+        channel: 2
+
+sensor:
+  - platform: bmp280_i2c
+    i2c_id: sensor_i2c
+    address: 0x77
+    temperature:
+      name: BMP280 Temperature
+    pressure:
+      name: BMP280 Pressure
+    update_interval: 60s
+  - platform: aht10
+    variant: AHT20
+    i2c_id: sensor_i2c
+    address: 0x38
+    temperature:
+      name: AHT20 Temperature
+    humidity:
+      name: AHT20 Humidity
+    update_interval: 60s
+  - platform: veml7700
+    i2c_id: light_channel_1
+    address: 0x10
+    ambient_light:
+      name: Channel 1 Illuminance
+    update_interval: 60s
+  - platform: veml7700
+    i2c_id: light_channel_2
+    address: 0x10
+    ambient_light:
+      name: Channel 2 Illuminance
+    update_interval: 60s
+
 # XIAO ESP32-S3: D6/TX = GPIO43 and D7/RX = GPIO44.
 # With the XIAO plugged into Seeed's bus-servo driver, the board routes these
 # through its half-duplex TTL interface. Set the driver's mode jumper to UART.
